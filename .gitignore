@@ -1,0 +1,8 @@
+# Episode data regenerates from seeds (data/pilot_00000.pkl alone is ~190 MB with RGB)
+data/
+# Large per-episode predictions and particles; regenerate with pilot_run.py
+results/*.pkl
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/

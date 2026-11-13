@@ -1,0 +1,8 @@
+# Versions used for the Stage 0 pilot (Python 3.12, CPU only).
+# Episodes regenerate bit-exactly from seeds only with the same MuJoCo version.
+mujoco==3.8.1
+numpy==2.2.6
+scipy==1.18.1
+pandas==3.1.1
+torch==2.15.0  # CPU wheel is enough: pip install torch --index-url https://download.pytorch.org/whl/cpu
+matplotlib==3.11.2

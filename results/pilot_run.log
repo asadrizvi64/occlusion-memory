@@ -1,0 +1,7 @@
+episodes: fit 1000, eval 1000
+tuned: B0 sig_tau 0.5 (nll -0.26); B1 q 0.1 (-1.46); B1d (0.01, 1.0, 0.6) (-2.76); 165s
+GRU trained: val nll -7.679; 379s
+fast methods done; 388s
+B2 done: 5.1 s/episode/core; 1661s
+OR done: 1.5 s/episode/core; 2031s
+PILOT_RUN_DONE
