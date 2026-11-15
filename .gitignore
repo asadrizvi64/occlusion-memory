@@ -8,4 +8,6 @@ __pycache__/
 .ipynb_checkpoints/
 # Live log of a running sweep; the summary JSON and CSV hold its results
 results/b2_diag.log
+results/b2_diag_resume.log
+results/b2_diag_s200.log
 results/b2_diag_parts/

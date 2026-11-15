@@ -27,7 +27,7 @@ Before any confirmatory run:
 
 1. ~~Make events while hidden common: at least 40% of hidden periods with an event, at least 10% with a collision.~~ Done in generator version 2: 53% events, 36% collisions on 200 pilot seeds ([log](docs/STAGE1_PREP.md)).
 2. Rebuild the learned baseline (B3): hidden-weighted loss, 10k episodes, scene information.
-3. Re-run B2 with more particles or tempering.
+3. ~~Re-run B2 with more particles or tempering.~~ Done: B2's overconfidence and its pre-contact gap to B1d come mainly from sample impoverishment (no process noise beyond roughening), not particle count. Roughening ×2 at 100 particles matches 500 particles at a fifth of the cost. Recommended B2 for Stage 1: 300 particles with roughening ×2, which is 3.0 cm better than B1d on fresh development episodes and 5.6 cm (38%) better after a hidden contact ([log](docs/STAGE1_PREP.md#change-3-why-b2-is-overconfident-and-worse-than-b1d-before-a-contact)).
 4. Decide the image resolution: 64×64 vs 96×96, or larger balls.
 
 ## What is here
@@ -42,6 +42,9 @@ Before any confirmatory run:
 | `make_figures.py` | Figures in `figures/`. |
 | `check_generator.py` | Generator version 1 vs 2 on the same pilot seeds: regression against the stored pilot, hidden-period labels, B1d vs B2 by label. Writes `results/generator_check.json`. |
 | `diag_collisions.py` | Hidden-collision diagnostic: frames hidden after contact, deflection, error before and after contact. Writes `results/collision_diag.csv`. |
+| `b2_diagnostics.py` | Change 3: B2 variants (particle count, tempering, roughening scale, negative evidence, true parameters) against B1d. Scores error, energy score, coverage of Gaussian and particle-HPD regions, ESS and runtime. Checkpoints each job and resumes. Writes `results/b2_diag*_summary.json` and `results/b2_diag*_intervals.csv`. |
+| `b2_report.py` | Tables for the change 3 write-up, with paired episode-clustered intervals. Writes `results/b2_diag*_tables.md`. |
+| `tests/` | Reproducibility and smoke tests: `python -m pytest -q tests`. The version-1 generator and the pilot's B1d/B2 predictions must reproduce bit for bit. |
 | `results/pilot_summary.json` | Every number in the pilot report. |
 | `results/pilot_intervals.csv` | One row per hidden period: label, duration, per-method error, coverage and region area. |
 

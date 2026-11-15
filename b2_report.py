@@ -1,7 +1,7 @@
 """Tables for the change 3 write-up, from the committed outputs of b2_diagnostics.py.
 
-    python b2_report.py            reads results/b2_diag_summary.json and results/b2_diag_intervals.csv
-                                   writes results/b2_diag_tables.md
+    python b2_report.py [tag=b2_diag]   reads results/<tag>_summary.json and results/<tag>_intervals.csv
+                                        writes results/<tag>_tables.md  (validation block: tag b2_diag_s200)
 
 Adds what the sweep summary does not compute: paired, episode-clustered intervals for
 (1) particle-derived (HPD) minus Gaussian-summary coverage within each filter, (2) each filter's coverage
@@ -10,12 +10,14 @@ Coverage here is the per-period mean over hidden frames, averaged over periods (
 as for error).
 """
 import json
+import sys
 
 import numpy as np
 import pandas as pd
 
 B_BOOT = 2000
-SUMMARY, CSV, OUT = "results/b2_diag_summary.json", "results/b2_diag_intervals.csv", "results/b2_diag_tables.md"
+TAG = sys.argv[1] if len(sys.argv) > 1 else "b2_diag"
+SUMMARY, CSV, OUT = f"results/{TAG}_summary.json", f"results/{TAG}_intervals.csv", f"results/{TAG}_tables.md"
 
 
 def boot(x, cl, rng):
@@ -48,7 +50,8 @@ def main():
     pfs = [m for m in methods if m != "B1d"]
     key = ["seed", "ball", "a"]
     P = S["paired"]
-    md = [f"# B2 diagnostics tables ({S['n_episodes']} development episodes, generator version 2)\n"]
+    lo, hi = S.get("seeds", ["?", "?"])
+    md = [f"# B2 diagnostics tables ({S['n_episodes']} development episodes, pilot seeds {lo}–{hi}, generator version 2)\n"]
 
     # ---- accuracy
     rows = []
@@ -104,16 +107,20 @@ def main():
            "B1d is Gaussian, so its ellipse is already its exact region.\n",
            table(["Method", "Gaussian 50%", "Gaussian 90%", "Gaussian 90% area", "HPD 50%", "HPD 90%", "HPD 90% area"], rows), ""]
 
-    rows = []
+    rows, zero = [], {}
     for m in pfs:
         G = df[df.method == m].dropna(subset=["hcov90", "gcov90"])
         cl = G.seed.values
+        pos = (G.harea90 > 0) & (G.garea90 > 0)  # an HPD region inside one grid cell has area 0
+        zero[m] = int((~pos).sum())
         rows.append([m, ci(boot(G.hcov90 - G.gcov90, cl, rng), 2, sign=True), ci(boot(G.hcov50 - G.gcov50, cl, rng), 2, sign=True),
                      ci(boot(G.gcov90 - 0.9, cl, rng), 2, sign=True), ci(boot(G.hcov90 - 0.9, cl, rng), 2, sign=True),
-                     ci(boot(np.log(G.harea90 / G.garea90), cl, rng), 2, sign=True)])
+                     ci(boot(np.log(G.harea90[pos] / G.garea90[pos]), cl[pos.values], rng), 2, sign=True)])
     G = df[df.method == "B1d"]
     rows.append(["B1d", "–", "–", ci(boot(G.gcov90 - 0.9, G.seed.values, rng), 2, sign=True), "–", "–"])
+    zs = ", ".join(f"{m} {k}" for m, k in zero.items() if k)
     md += ["## Region construction: paired, clustered 95% intervals\n",
+           "Area ratio excludes periods whose HPD region is smaller than one grid cell (area 0)" + (f": {zs}." if zs else ": none.") + "\n",
            table(["Method", "HPD − Gaussian, 90% coverage", "HPD − Gaussian, 50% coverage", "Gaussian 90% − 0.90", "HPD 90% − 0.90",
                   "log(HPD area / Gaussian area), 90%"], rows), ""]
 

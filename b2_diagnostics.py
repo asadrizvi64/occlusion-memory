@@ -11,7 +11,7 @@ Configurations
   B2-100-rayNE                    negative evidence from the same 9-ray visibility test that labels the truth
                                   (pilot B2 uses the table-plane hidden-cell map at the particle centre)
   OR-100                          true physical parameters, 100 particles (isolates parameter uncertainty)
-  B2-100-R0, B2-100-R2            roughening at resampling off / doubled (pilot: pos 3 mm, vel 2 cm/s,
+  B2-100-R0, -R2, -R4             roughening at resampling off / x2 / x4 (pilot: pos 3 mm, vel 2 cm/s,
                                   params x exp(N(0, 0.05))); same random numbers, so only the jitter size differs
   B1d                             reference
 
@@ -24,7 +24,10 @@ Scored on hidden frames (as in the pilot), per hidden period:
 Also: state error (position, velocity) at the last visible frame before each hidden period; error on
 visible frames; ESS, resampling rate, particle diversity, runtime.
 
-    python b2_diagnostics.py [n_episodes=200] [n_workers=4] [configs=all, comma-separated]
+    python b2_diagnostics.py [n_episodes=200] [n_workers=4] [configs, comma-separated] [start=0]
+
+Episodes are pilot-range seeds start .. start + n - 1. start=0 is the selection block (default configs: all but the
+combined candidates); start=200 is the validation block, whose outputs get an "_s200" suffix.
 Writes results/b2_diag_intervals.csv, results/b2_diag_summary.json (and results/b2_diag_raw.pkl). Each job is
 saved to results/b2_diag_parts/ as it finishes; rerunning the same command resumes and then summarizes.
 """
@@ -50,13 +53,17 @@ CONFIGS = {
     "B2-100-noNE": dict(n_part=100, neg_evidence="off"), "B2-100-rayNE": dict(n_part=100, neg_evidence="ray"),
     "OR-100": dict(n_part=100, oracle=True),
     "B2-100-R0": dict(n_part=100, rough=0.0), "B2-100-R2": dict(n_part=100, rough=2.0),
+    "B2-100-R4": dict(n_part=100, rough=4.0),
+    # candidates combining the levers above; run only on the validation block (start=200), see STAGE1_PREP.md
+    "B2-300-R2": dict(n_part=300, rough=2.0), "B2-300-R2-T": dict(n_part=300, rough=2.0, temper=TEMPER),
 }
+SELECTION = [k for k in CONFIGS if k not in ("B2-300-R2", "B2-300-R2-T")]  # default set for the selection block
 CHI2 = {50: 1.386, 90: 4.605}
 H_MIN = 0.005  # m; kernel bandwidth floor (half the measurement noise)
 B_BOOT = 2000
 
 
-def make_episode(k):
+def make_episode(k):  # k: index into the pilot seed range
     ep = gen.sample_episode(gen.SEED_RANGES["pilot"][0] + k, version=2)
     ep["sim"] = gen.simulate(ep, render=False)
     return ep
@@ -191,7 +198,7 @@ def summarize(eps, results):
         vis_errs.append(v)
     df = pd.DataFrame(rows)
     methods = list(results[eps[0]["seed"]].keys())
-    S = dict(n_episodes=len(eps), temper=TEMPER, h_min_cm=H_MIN * 100, configs={k: v for k, v in CONFIGS.items()})
+    S = dict(n_episodes=len(eps), seeds=[int(eps[0]["seed"]), int(eps[-1]["seed"])], temper=TEMPER, h_min_cm=H_MIN * 100, configs={k: v for k, v in CONFIGS.items()})
     groups = {"all": df, "none": df[df.label == "none"], "stopped": df[df.label == "stopped"], "bounce": df[df.label == "bounce"],
               "collision": df[df.label == "collision"], "event": df[df.label.isin(["bounce", "collision"])]}
     S["by_method"] = {}
@@ -249,18 +256,19 @@ def run_and_save(args):
     return r["name"], r["seed"]
 
 
-def main(n=200, workers=4, configs=None):
+def main(n=200, workers=4, configs=None, start=0):
     # Each particle's MjData has a 14.7 MB arena. glibc's dynamic mmap threshold moves such blocks onto the
     # heap after the first free, the heap fragments, and workers grew to 4 GB until the container's memory
     # limit killed them (a multiprocessing pool then waits forever for the lost task). A fixed threshold
     # keeps the arenas mmapped and returned on free; workers are also recycled. Results are unaffected.
     import ctypes
     ctypes.CDLL("libc.so.6").mallopt(-3, 1 << 20)  # M_MMAP_THRESHOLD = 1 MB
-    names = list(CONFIGS) if not configs else configs.split(",")
+    names = SELECTION if not configs else configs.split(",")
+    tag = "b2_diag" if start == 0 else f"b2_diag_s{start}"
     os.makedirs(PARTS, exist_ok=True)
     with Pool(workers, maxtasksperchild=8) as pool:
         t0 = time.time()
-        eps = pool.map(make_episode, range(n), chunksize=4)
+        eps = pool.map(make_episode, range(start, start + n), chunksize=4)
         print(f"{n} episodes in {time.time() - t0:.0f}s", flush=True)
         cost = {nm: CONFIGS[nm]["n_part"] * (2 if CONFIGS[nm].get("neg_evidence") == "ray" else 1) for nm in names}
         jobs = [(nm, e) for nm in sorted(names, key=lambda x: -cost[x]) for e in eps] + [("B1d", e) for e in eps]
@@ -272,10 +280,10 @@ def main(n=200, workers=4, configs=None):
     order = names + ["B1d"]
     results = {e["seed"]: {k: pickle.load(open(part_path(k, e["seed"]), "rb")) for k in order} for e in eps}
     os.makedirs("results", exist_ok=True)
-    pickle.dump(dict(results=results, seeds=[e["seed"] for e in eps]), open("results/b2_diag_raw.pkl", "wb"), protocol=4)
+    pickle.dump(dict(results=results, seeds=[e["seed"] for e in eps]), open(f"results/{tag}_raw.pkl", "wb"), protocol=4)
     S, df = summarize(eps, results)
-    json.dump(S, open("results/b2_diag_summary.json", "w"), indent=1, default=float)
-    df.to_csv("results/b2_diag_intervals.csv", index=False)
+    json.dump(S, open(f"results/{tag}_summary.json", "w"), indent=1, default=float)
+    df.to_csv(f"results/{tag}_intervals.csv", index=False)
     print_summary(S)
 
 
@@ -295,4 +303,5 @@ def print_summary(S):
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    main(int(a[0]) if len(a) > 0 else 200, int(a[1]) if len(a) > 1 else 4, a[2] if len(a) > 2 else None)
+    main(int(a[0]) if len(a) > 0 else 200, int(a[1]) if len(a) > 1 else 4, a[2] if len(a) > 2 and a[2] != "-" else None,
+         int(a[3]) if len(a) > 3 else 0)
