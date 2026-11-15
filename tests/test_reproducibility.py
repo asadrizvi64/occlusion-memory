@@ -78,12 +78,12 @@ def test_particle_filter_options_smoke():
     ep["sim"] = gen.simulate(ep, render=False)
     z = B.measurements(ep)
     base = B.particle_filter(ep, z, n_part=12)
-    for kw in (dict(temper=0.25), dict(neg_evidence="off"), dict(neg_evidence="ray"), dict(oracle=True)):
+    for kw in (dict(temper=0.25), dict(neg_evidence="off"), dict(neg_evidence="ray"), dict(oracle=True), dict(rough=0.0)):
         mu, cov, kept, D = B.particle_filter(ep, z, n_part=12, keep_particles=True, diag=True, **kw)
         assert mu.shape == base[0].shape and len(kept) == z.shape[0]
         assert D["vel"].shape == mu.shape and np.nanmax(D["ess"]) <= 1.0 + 1e-9
     # options at their defaults change nothing
-    same = B.particle_filter(ep, z, n_part=12, temper=1.0, neg_evidence="mask", diag=True)
+    same = B.particle_filter(ep, z, n_part=12, temper=1.0, neg_evidence="mask", rough=1.0, diag=True)
     assert np.array_equal(same[0], base[0], equal_nan=True)
     _, _, vel = B.kalman(z, 0.01, damp=1.0, rest=0.6, return_vel=True)
     assert vel.shape == base[0].shape

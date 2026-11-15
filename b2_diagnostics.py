@@ -11,6 +11,8 @@ Configurations
   B2-100-rayNE                    negative evidence from the same 9-ray visibility test that labels the truth
                                   (pilot B2 uses the table-plane hidden-cell map at the particle centre)
   OR-100                          true physical parameters, 100 particles (isolates parameter uncertainty)
+  B2-100-R0, B2-100-R2            roughening at resampling off / doubled (pilot: pos 3 mm, vel 2 cm/s,
+                                  params x exp(N(0, 0.05))); same random numbers, so only the jitter size differs
   B1d                             reference
 
 Scored on hidden frames (as in the pilot), per hidden period:
@@ -47,6 +49,7 @@ CONFIGS = {
     "B2-100-T": dict(n_part=100, temper=TEMPER), "B2-300-T": dict(n_part=300, temper=TEMPER),
     "B2-100-noNE": dict(n_part=100, neg_evidence="off"), "B2-100-rayNE": dict(n_part=100, neg_evidence="ray"),
     "OR-100": dict(n_part=100, oracle=True),
+    "B2-100-R0": dict(n_part=100, rough=0.0), "B2-100-R2": dict(n_part=100, rough=2.0),
 }
 CHI2 = {50: 1.386, 90: 4.605}
 H_MIN = 0.005  # m; kernel bandwidth floor (half the measurement noise)

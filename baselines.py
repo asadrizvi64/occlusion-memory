@@ -86,13 +86,15 @@ def kalman(z, q, damp=0.0, rest=None, half=0.5, radius=None, return_vel=False):
 
 # ---------------------------------------------------------------- B2 / oracle
 def particle_filter(ep, z, n_part=100, oracle=False, seed=0, keep_particles=False, temper=1.0, neg_evidence="mask",
-                    diag=False):
+                    rough=1.0, diag=False):
     """B2 (and the oracle-parameter reference with oracle=True). Defaults reproduce the Stage 0 pilot.
 
     temper        exponent on the per-frame likelihood (measurement and negative evidence); < 1 flattens it
     neg_evidence  "mask": a hidden ball's particles are scored with the camera's table-plane hidden map at the
                   particle centre (pilot); "ray": with the same 9-ray visibility test that labels the truth;
                   "off": no negative evidence
+    rough         scale on the roughening noise added at each resampling (0 = none). The same random numbers
+                  are drawn at every scale, so variants differ only in the jitter's size
     diag          also return a dict: ess (T,) before any resampling, resampled (T,), unique (T,) share of
                   distinct particles kept by a resampling, vel (T, n, 2) weighted mean velocity
     """
@@ -186,11 +188,11 @@ def particle_filter(ep, z, n_part=100, oracle=False, seed=0, keep_particles=Fals
                     d = mujoco.MjData(m)
                     mujoco.mj_copyData(d, m, datas[k])
                     for i in range(n):
-                        d.qpos[qadr[i]:qadr[i] + 2] += rng.normal(0, 0.003, 2)
-                        d.qvel[vadr[i]:vadr[i] + 2] += rng.normal(0, 0.02, 2)
+                        d.qpos[qadr[i]:qadr[i] + 2] += rough * rng.normal(0, 0.003, 2)
+                        d.qvel[vadr[i]:vadr[i] + 2] += rough * rng.normal(0, 0.02, 2)
                     prm = params[k].copy()
                     if not oracle:
-                        prm[:, :3] *= np.exp(rng.normal(0, 0.05, (n, 3)))
+                        prm[:, :3] *= np.exp(rough * rng.normal(0, 0.05, (n, 3)))
                     new_d.append(d)
                     new_p.append(prm)
                 datas, params = new_d, new_p
