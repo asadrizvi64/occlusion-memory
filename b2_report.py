@@ -139,6 +139,12 @@ def main():
            "Unique: share of distinct particles a resampling keeps. Runtime: one core, filter only.\n",
            table(["Method", "ESS / N", "Resample rate", "Unique at resample", "Visible-frame error (cm)", "Last-visible pos (cm)",
                   "Last-visible vel (cm/s)", "s / episode"], rows), ""]
+    rows = [[m] + [f"{M[m]['visible_frame_err_by_t'][b]:.2f}" for b in ("t1-4", "t5-19", "t20+")] + [f"{M[m]['visible_frame_err']:.2f}"]
+            for m in methods]
+    md += ["## Error on visible frames by time since the episode start (cm)\n",
+           "Frames where the ball is visible and not inside a hidden period; mean per episode, then over episodes. "
+           "For reference, the raw measurement's mean error is σ√(π/2) = 1.25 cm.\n",
+           table(["Method", "Frames 1–4", "Frames 5–19", "Frames 20+", "All"], rows), ""]
     open(OUT, "w").write("\n".join(md))
     print("\n".join(md))
 

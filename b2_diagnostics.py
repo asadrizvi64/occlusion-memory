@@ -173,7 +173,11 @@ def period_rows(ep, res):
             for k in ("gcov50", "gcov90", "garea90", "gnll", "es", "hcov50", "hcov90", "harea50", "harea90", "bandwidth_cm"):
                 row[k] = np.nanmean(F[k][f, i]) if np.isfinite(F[k][f, i]).any() else np.nan
             rows.append(row)
-    vis_err = {name: float(np.nanmean(r["F"]["err"][1:][vis[1:] & ~hid[1:]])) for name, r in res.items()}
+    sel = vis & ~hid
+    sel[0] = False
+    tt = np.arange(sel.shape[0])[:, None]
+    bins = {"all": sel, "t1-4": sel & (tt < 5), "t5-19": sel & (tt >= 5) & (tt < 20), "t20+": sel & (tt >= 20)}
+    vis_err = {name: {b: float(np.nanmean(r["F"]["err"][m])) if m.any() else np.nan for b, m in bins.items()} for name, r in res.items()}
     return rows, vis_err
 
 
@@ -203,7 +207,9 @@ def summarize(eps, results):
         A = df[df.method == mth]
         d["last_visible"] = dict(pos_err=float(A.last_visible_pos_err.mean()), vel_err=float(A.last_visible_vel_err.mean()),
                                  n=int(A.last_visible_pos_err.notna().sum()))
-        d["visible_frame_err"] = float(np.mean([v[mth] for v in vis_errs]))
+        # visible, not-hidden frames after t=0; mean per episode, then over episodes (one episode has none)
+        d["visible_frame_err"] = float(np.nanmean([v[mth]["all"] for v in vis_errs]))
+        d["visible_frame_err_by_t"] = {b: float(np.nanmean([v[mth][b] for v in vis_errs])) for b in ("t1-4", "t5-19", "t20+")}
         rs = [results[e["seed"]][mth] for e in eps]
         d["runtime_s_per_episode"] = float(np.mean([r["runtime"] for r in rs]))
         if "diag" in rs[0]:
