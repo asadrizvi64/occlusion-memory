@@ -46,10 +46,11 @@ def last_seen(z, sig_tau):
 
 
 # ---------------------------------------------------------------- B1
-def kalman(z, q, damp=0.0, rest=None, half=0.5, radius=None):
+def kalman(z, q, damp=0.0, rest=None, half=0.5, radius=None, return_vel=False):
     """Constant-velocity KF (B1). With damp > 0 the velocity decays as exp(-damp * dt) per step,
     and with rest set the predicted position reflects off the arena walls with that restitution
-    (B1d: simple physics tracking; it knows walls, not blocks or other balls)."""
+    (B1d: simple physics tracking; it knows walls, not blocks or other balls).
+    return_vel=True also returns the velocity mean (T, n, 2), for diagnostics."""
     T, n, _ = z.shape
     a_ = np.exp(-damp * DT)
     F = np.array([[1, 0, DT, 0], [0, 1, 0, DT], [0, 0, a_, 0], [0, 0, 0, a_]], float)
@@ -58,6 +59,7 @@ def kalman(z, q, damp=0.0, rest=None, half=0.5, radius=None):
     H = np.eye(2, 4)
     Rm = np.eye(2) * SIGMA_M ** 2
     mu, cov = np.full((T, n, 2), np.nan), np.full((T, n, 2, 2), np.nan)
+    vel = np.full((T, n, 2), np.nan)
     for i in range(n):
         x, P = None, None
         lim = half - (radius[i] if radius is not None else 0.03)
@@ -78,12 +80,22 @@ def kalman(z, q, damp=0.0, rest=None, half=0.5, radius=None):
                     x = x + K @ (z[t, i] - H @ x)
                     P = (np.eye(4) - K @ H) @ P
             if x is not None:
-                mu[t, i], cov[t, i] = x[:2], P[:2, :2]
-    return mu, cov
+                mu[t, i], cov[t, i], vel[t, i] = x[:2], P[:2, :2], x[2:]
+    return (mu, cov, vel) if return_vel else (mu, cov)
 
 
 # ---------------------------------------------------------------- B2 / oracle
-def particle_filter(ep, z, n_part=100, oracle=False, seed=0, keep_particles=False):
+def particle_filter(ep, z, n_part=100, oracle=False, seed=0, keep_particles=False, temper=1.0, neg_evidence="mask",
+                    diag=False):
+    """B2 (and the oracle-parameter reference with oracle=True). Defaults reproduce the Stage 0 pilot.
+
+    temper        exponent on the per-frame likelihood (measurement and negative evidence); < 1 flattens it
+    neg_evidence  "mask": a hidden ball's particles are scored with the camera's table-plane hidden map at the
+                  particle centre (pilot); "ray": with the same 9-ray visibility test that labels the truth;
+                  "off": no negative evidence
+    diag          also return a dict: ess (T,) before any resampling, resampled (T,), unique (T,) share of
+                  distinct particles kept by a resampling, vel (T, n, 2) weighted mean velocity
+    """
     import mujoco
 
     import gen
@@ -135,8 +147,13 @@ def particle_filter(ep, z, n_part=100, oracle=False, seed=0, keep_particles=Fals
         i, j = np.clip(((p + gen.HALF) / gen.GRID).astype(int), 0, mask.shape[0] - 1)
         return mask[i, j]
 
+    def ray_hidden(k, i):
+        return gen.ray_visibility(m, datas[k], bid[i], gid[i], ep["balls"][i]["radius"]) < 3 / 9
+
     mu, cov = np.full((T, n, 2), np.nan), np.full((T, n, 2, 2), np.nan)
     kept = {} if keep_particles else None
+    D = dict(ess=np.full(T, np.nan), resampled=np.zeros(T, bool), unique=np.full(T, np.nan),
+             vel=np.full((T, n, 2), np.nan)) if diag else None
     first = [int(np.argmax(~np.isnan(z[:, i, 0]))) for i in range(n)]
     for t in range(T):
         if t > 0:
@@ -149,15 +166,21 @@ def particle_filter(ep, z, n_part=100, oracle=False, seed=0, keep_particles=Fals
             for i in range(n):
                 if not np.isnan(z[t, i, 0]):
                     d2 = ((P[:, i] - z[t, i]) ** 2).sum(-1)
-                    logw += -0.5 * d2 / (SIGMA_M ** 2 + 0.01 ** 2)
-                elif t > first[i]:
-                    logw += np.log(np.where([cell_hidden(p) for p in P[:, i]], 0.95, 0.05))
+                    logw += temper * (-0.5 * d2 / (SIGMA_M ** 2 + 0.01 ** 2))
+                elif t > first[i] and neg_evidence != "off":
+                    hid = [cell_hidden(p) for p in P[:, i]] if neg_evidence == "mask" else [ray_hidden(k, i) for k in range(n_part)]
+                    logw += temper * np.log(np.where(hid, 0.95, 0.05))
             logw -= logw.max()
             w = np.exp(logw)
             w /= w.sum()
-            if 1.0 / (w ** 2).sum() < n_part / 2:  # systematic resampling + roughening
+            ess = 1.0 / (w ** 2).sum()
+            if diag:
+                D["ess"][t] = ess / n_part
+            if ess < n_part / 2:  # systematic resampling + roughening
                 u = (rng.random() + np.arange(n_part)) / n_part
                 idx = np.minimum(np.searchsorted(np.cumsum(w), u), n_part - 1)
+                if diag:
+                    D["resampled"][t], D["unique"][t] = True, len(np.unique(idx)) / n_part
                 new_d, new_p = [], []
                 for k in idx:
                     d = mujoco.MjData(m)
@@ -180,7 +203,12 @@ def particle_filter(ep, z, n_part=100, oracle=False, seed=0, keep_particles=Fals
                 cov[t, i] = (w[:, None, None] * dd[:, :, None] * dd[:, None, :]).sum(0) + np.eye(2) * 1e-6
         if keep_particles:
             kept[t] = (P.astype(np.float32), w.astype(np.float32))
-    return mu, cov, kept
+        if diag:
+            V = np.array([[datas[k].qvel[vadr[i]:vadr[i] + 2] for i in range(n)] for k in range(n_part)])
+            for i in range(n):
+                if t >= first[i]:
+                    D["vel"][t, i] = (w[:, None] * V[:, i]).sum(0)
+    return (mu, cov, kept, D) if diag else (mu, cov, kept)
 
 
 # ---------------------------------------------------------------- B3
