@@ -23,7 +23,8 @@ Also: state error (position, velocity) at the last visible frame before each hid
 visible frames; ESS, resampling rate, particle diversity, runtime.
 
     python b2_diagnostics.py [n_episodes=200] [n_workers=4] [configs=all, comma-separated]
-Writes results/b2_diag_intervals.csv, results/b2_diag_summary.json (and results/b2_diag_raw.pkl).
+Writes results/b2_diag_intervals.csv, results/b2_diag_summary.json (and results/b2_diag_raw.pkl). Each job is
+saved to results/b2_diag_parts/ as it finishes; rerunning the same command resumes and then summarizes.
 """
 import json
 import os
@@ -224,23 +225,43 @@ def summarize(eps, results):
     return S, df
 
 
+PARTS = "results/b2_diag_parts"  # one pickle per (method, episode); lets an interrupted sweep resume
+
+
+def part_path(name, seed):
+    return f"{PARTS}/{name}_{seed}.pkl"
+
+
+def run_and_save(args):
+    r = job(args)
+    tmp = part_path(r["name"], r["seed"]) + ".tmp"
+    pickle.dump(r, open(tmp, "wb"), protocol=4)
+    os.replace(tmp, part_path(r["name"], r["seed"]))
+    return r["name"], r["seed"]
+
+
 def main(n=200, workers=4, configs=None):
+    # Each particle's MjData has a 14.7 MB arena. glibc's dynamic mmap threshold moves such blocks onto the
+    # heap after the first free, the heap fragments, and workers grew to 4 GB until the container's memory
+    # limit killed them (a multiprocessing pool then waits forever for the lost task). A fixed threshold
+    # keeps the arenas mmapped and returned on free; workers are also recycled. Results are unaffected.
+    import ctypes
+    ctypes.CDLL("libc.so.6").mallopt(-3, 1 << 20)  # M_MMAP_THRESHOLD = 1 MB
     names = list(CONFIGS) if not configs else configs.split(",")
-    with Pool(workers) as pool:
+    os.makedirs(PARTS, exist_ok=True)
+    with Pool(workers, maxtasksperchild=8) as pool:
         t0 = time.time()
         eps = pool.map(make_episode, range(n), chunksize=4)
         print(f"{n} episodes in {time.time() - t0:.0f}s", flush=True)
         cost = {nm: CONFIGS[nm]["n_part"] * (2 if CONFIGS[nm].get("neg_evidence") == "ray" else 1) for nm in names}
         jobs = [(nm, e) for nm in sorted(names, key=lambda x: -cost[x]) for e in eps] + [("B1d", e) for e in eps]
-        results = {e["seed"]: {} for e in eps}
-        done = 0
-        for r in pool.imap_unordered(job, jobs, chunksize=1):
-            results[r["seed"]][r["name"]] = r
-            done += 1
-            if done % 100 == 0 or done == len(jobs):
-                print(f"{done}/{len(jobs)} jobs, {time.time() - t0:.0f}s", flush=True)
+        todo = [j for j in jobs if not os.path.exists(part_path(j[0], j[1]["seed"]))]
+        print(f"{len(jobs) - len(todo)} of {len(jobs)} jobs already saved in {PARTS}", flush=True)
+        for done, _ in enumerate(pool.imap_unordered(run_and_save, todo, chunksize=1), 1):
+            if done % 100 == 0 or done == len(todo):
+                print(f"{done}/{len(todo)} jobs, {time.time() - t0:.0f}s", flush=True)
     order = names + ["B1d"]
-    results = {s: {k: v[k] for k in order} for s, v in results.items()}
+    results = {e["seed"]: {k: pickle.load(open(part_path(k, e["seed"]), "rb")) for k in order} for e in eps}
     os.makedirs("results", exist_ok=True)
     pickle.dump(dict(results=results, seeds=[e["seed"] for e in eps]), open("results/b2_diag_raw.pkl", "wb"), protocol=4)
     S, df = summarize(eps, results)
