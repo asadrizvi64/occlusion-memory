@@ -6,6 +6,7 @@ The research spec and the Stage 0 pilot report live in [`docs/`](docs/):
 
 - [`docs/SPEC.md`](docs/SPEC.md): hypotheses H1–H3, frozen methodological rules, baselines, data protocol, metrics and stage gates.
 - [`docs/PILOT_REPORT.md`](docs/PILOT_REPORT.md): Stage 0 pilot, with the benchmark generator, six methods, results, limitations and changes before Stage 1.
+- [`docs/STAGE1_PREP.md`](docs/STAGE1_PREP.md): log of the changes made before Stage 1, with their checks.
 
 ## Status
 
@@ -22,9 +23,9 @@ The research spec and the Stage 0 pilot report live in [`docs/`](docs/):
 | 90%-region coverage: B1d / B2 | 86% / 47% (B2 is accurate but overconfident) |
 | Bounce/collision periods where B2's particles go bimodal | 51% |
 
-Next, before any confirmatory run:
+Before any confirmatory run:
 
-1. Make events while hidden common: at least 40% of hidden periods with an event, at least 10% with a collision.
+1. ~~Make events while hidden common: at least 40% of hidden periods with an event, at least 10% with a collision.~~ Done in generator version 2: 53% events, 36% collisions on 200 pilot seeds ([log](docs/STAGE1_PREP.md)).
 2. Rebuild the learned baseline (B3): hidden-weighted loss, 10k episodes, scene information.
 3. Re-run B2 with more particles or tempering.
 4. Decide the image resolution: 64×64 vs 96×96, or larger balls.
@@ -33,12 +34,14 @@ Next, before any confirmatory run:
 
 | Path | Purpose |
 |---|---|
-| `gen.py` | Procedural MuJoCo benchmark: walled 1 m tabletop, 1–2 balls, screens (occlude only) and blocks (occlude and collide), per-episode camera, ray-cast visibility and hidden-region maps, event labels. `SEED_RANGES` fixes disjoint seeds per split. |
+| `gen.py` | Procedural MuJoCo benchmark: walled 1 m tabletop, 1–2 balls, screens (occlude only) and blocks (occlude and collide), per-episode camera, ray-cast visibility and hidden-region maps, event labels. `SEED_RANGES` fixes disjoint seeds per split. Version 2 (default) adds a collision-course mode for hidden collisions; `version=1` reproduces the pilot exactly. |
 | `baselines.py` | B0 last-seen, B1 constant-velocity Kalman, B1d damped Kalman with wall reflection, B2 MuJoCo particle filter (prior-sampled parameters, negative evidence from the hidden-region map), oracle-parameter filter, B3 GRU with Gaussian output. |
-| `make_pilot.py` | Generate pilot episodes: `python make_pilot.py <start> <n> <render 0/1>`. |
+| `make_pilot.py` | Generate pilot episodes: `python make_pilot.py <start> <n> <render 0/1> [version, default 1]`. |
 | `pilot_run.py` | Tune on the fit half, train the GRU, run every method on the eval half. |
 | `pilot_analyze.py` | Hidden-period labels, errors, coverage, episode-clustered bootstrap, power estimate, multimodality test. |
 | `make_figures.py` | Figures in `figures/`. |
+| `check_generator.py` | Generator version 1 vs 2 on the same pilot seeds: regression against the stored pilot, hidden-period labels, B1d vs B2 by label. Writes `results/generator_check.json`. |
+| `diag_collisions.py` | Hidden-collision diagnostic: frames hidden after contact, deflection, error before and after contact. Writes `results/collision_diag.csv`. |
 | `results/pilot_summary.json` | Every number in the pilot report. |
 | `results/pilot_intervals.csv` | One row per hidden period: label, duration, per-method error, coverage and region area. |
 

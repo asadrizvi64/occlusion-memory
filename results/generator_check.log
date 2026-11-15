@@ -1,0 +1,67 @@
+{
+ "v1_seconds_per_episode": {
+  "sample": 0.031860040426254274,
+  "simulate": 0.6206696462631226
+ },
+ "v2_seconds_per_episode": {
+  "sample": 0.07724974989891052,
+  "simulate": 0.5809793257713318
+ },
+ "v1_matches_stored_pilot": "200/200",
+ "labels": {
+  "v1": {
+   "none": 106,
+   "stopped": 25,
+   "bounce": 47,
+   "collision": 3,
+   "n": 181,
+   "event_share": 0.27624309392265195,
+   "collision_share": 0.016574585635359115
+  },
+  "v2": {
+   "none": 88,
+   "stopped": 17,
+   "bounce": 37,
+   "collision": 80,
+   "n": 222,
+   "event_share": 0.527027027027027,
+   "collision_share": 0.36036036036036034
+  },
+  "v2_collide_only": {
+   "none": 14,
+   "stopped": 0,
+   "bounce": 3,
+   "collision": 78,
+   "n": 95,
+   "event_share": 0.8526315789473684,
+   "collision_share": 0.8210526315789474
+  },
+  "v2_free_only": {
+   "none": 74,
+   "stopped": 17,
+   "bounce": 34,
+   "collision": 2,
+   "n": 127,
+   "event_share": 0.28346456692913385,
+   "collision_share": 0.015748031496062992
+  }
+ },
+ "v2_modes": {
+  "collide": 49,
+  "free": 151,
+  "collide_failed": 53
+ },
+ "v2_collide_with_hidden_collision_period": 45
+}
+v1:all           n= 181  B1d   8.2  B2   7.8  B1d-B2  +0.4 [-0.6, +1.3]
+v1:bounce        n=  47  B1d  14.2  B2  11.7  B1d-B2  +2.5 [-0.5, +5.4]
+v1:collision     n=   3  B1d   8.7  B2   7.0  B1d-B2  +1.7 [-0.3, +5.7]
+v1:none          n= 106  B1d   5.2  B2   5.7  B1d-B2  -0.5 [-1.3, +0.2]
+v1:stopped       n=  25  B1d   9.8  B2   9.6  B1d-B2  +0.2 [-3.3, +3.6]
+v1:event         n=  50  B1d  13.9  B2  11.5  B1d-B2  +2.4 [-0.4, +5.3]
+v2:all           n= 222  B1d   9.8  B2   8.8  B1d-B2  +1.0 [-0.4, +2.2]
+v2:bounce        n=  37  B1d  14.7  B2  13.0  B1d-B2  +1.7 [-1.8, +5.1]
+v2:collision     n=  80  B1d  12.6  B2  10.4  B1d-B2  +2.2 [-0.7, +4.9]
+v2:none          n=  88  B1d   5.2  B2   5.3  B1d-B2  -0.1 [-0.9, +0.7]
+v2:stopped       n=  17  B1d   9.6  B2  10.8  B1d-B2  -1.2 [-5.6, +2.9]
+v2:event         n= 117  B1d  13.3  B2  11.2  B1d-B2  +2.1 [-0.4, +4.2]

@@ -9,6 +9,17 @@ One MuJoCo arena per episode:
 Ball 0 is launched toward an occluder so occlusions are common; ball 1 (if any) moves
 randomly, which creates collision opportunities, sometimes behind an occluder.
 
+Generator versions (ep["gen_version"]):
+  1  Stage 0 pilot generator. Kept bit-identical so the pilot regenerates from its seeds.
+  2  Adds a collision-course mode (ep["mode"] == "collide") in P_COLLIDE of episodes: ball 1
+     is launched from a visible start so that it meets ball 0 while ball 0 is inside the hidden
+     region. The meeting is timed by bisection on ball 1's launch speed and accepted only if a
+     physics-only rollout puts the first ball-ball contact in a hidden cell and keeps a ball that
+     was hidden at contact hidden for at least 0.5 s afterwards. Everything else
+     (scene, camera, ball 0) uses the same random draws as version 1, so the two versions
+     differ only in ball 1 of collide-mode episodes. If no collision course is found the
+     episode stays as in version 1 (ep["mode"] == "free", ep["collide_failed"] = True).
+
 Ground truth kept for supervision/evaluation only: positions, velocities, per-frame
 visible pixel count (segmentation render), contact events per frame, sampled parameters,
 and a hidden-region mask of the table plane (ray casts from the camera).
@@ -37,6 +48,9 @@ HALF = 0.5  # arena half-size (m)
 GRID = 0.02  # hidden-mask resolution (m)
 VIS_PX = 2  # a ball counts as visible with at least this many pixels
 EV = {"none": 0, "bounce": 1, "collision": 2}
+GEN_VERSION = 2
+P_COLLIDE = 0.5  # version 2: share of episodes that attempt a hidden collision course
+MIN_POST_HIDDEN = 5  # version 2: frames a ball hidden at contact must stay hidden after it (0 = no requirement)
 COLORS = [(0.85, 0.2, 0.15), (0.15, 0.35, 0.85), (0.2, 0.7, 0.3)]
 
 
@@ -83,9 +97,10 @@ def fit_dist(elev, azim, fovy=50.0, margin_px=2.0):
     raise RuntimeError("camera fit failed")
 
 
-def sample_episode(seed, n_obj=None, ranges=None):
+def sample_episode(seed, n_obj=None, ranges=None, version=GEN_VERSION):
     """Occluders and camera first; then the hidden region is found by ray casting, and ball 0 is
-    launched toward a random hidden cell, so most episodes contain an occlusion."""
+    launched toward a random hidden cell, so most episodes contain an occlusion. Version 2 may then
+    replace ball 1 with one on a collision course (see the module docstring)."""
     r = np.random.default_rng(seed)
     R = dict(mass=(0.1, 1.0), mu_slide=(0.05, 0.4), mu_roll=(0.0002, 0.002), speed=(0.3, 1.5),
              radius=(0.02, 0.04), elev=(50.0, 70.0), azim=(-15.0, 15.0))
@@ -141,7 +156,110 @@ def sample_episode(seed, n_obj=None, ranges=None):
                           mu_roll=r.uniform(*R["mu_roll"]), bouncy=bool(r.random() < 0.5)))
     ep["balls"] = balls
     ep["target"] = tgt
+    ep["gen_version"], ep["mode"] = version, "free"
+    if version >= 2:
+        r2 = np.random.default_rng([seed, 2])  # separate stream: version-1 draws above stay identical
+        if r2.random() < P_COLLIDE:
+            found = collision_course(ep, mask, r2, R)
+            if found is None:
+                ep["collide_failed"] = True
+            else:
+                ep["balls"] = [balls[0], found[0]] + balls[2:]
+                ep["mode"], ep["collide_plan"] = "collide", found[1]
     return ep
+
+
+def in_mask(p, mask):
+    i, j = np.clip(((np.asarray(p) + HALF) / GRID).astype(int), 0, mask.shape[0] - 1)
+    return bool(mask[i, j])
+
+
+def rollout(ep):
+    """Physics only (no rendering or visibility): ball centres (x, y) per frame, and the first
+    ball-ball contact between balls 0 and 1 as (time s, centre 0, centre 1), or None."""
+    m = mujoco.MjModel.from_xml_string(build_xml(ep))
+    d = mujoco.MjData(m)
+    n = len(ep["balls"])
+    bb = [mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, f"ball{i}") for i in range(n)]
+    for i, b in enumerate(ep["balls"]):
+        d.qvel[m.body_dofadr[bb[i]]:m.body_dofadr[bb[i]] + 2] = b["v0"]
+    mujoco.mj_forward(m, d)
+    pos = np.zeros((N_FRAMES, n, 2))
+    pos[0] = d.xpos[bb, :2]
+    first = None
+    rsum = ep["balls"][0]["radius"] + ep["balls"][1]["radius"] + 1e-3 if n > 1 else None
+    for t in range(1, N_FRAMES):
+        if first is None and n > 1:
+            for k in range(SUB):
+                mujoco.mj_step(m, d)
+                if np.linalg.norm(d.xpos[bb[0], :2] - d.xpos[bb[1], :2]) < rsum:
+                    first = (((t - 1) * SUB + k + 1) * DT, d.xpos[bb[0], :2].copy(), d.xpos[bb[1], :2].copy())
+                    mujoco.mj_step(m, d, nstep=SUB - k - 1)
+                    break
+        else:
+            mujoco.mj_step(m, d, nstep=SUB)
+        pos[t] = d.xpos[bb, :2]
+    return pos, first
+
+
+def _travel(m, d, dof, body, p_start, direction, speed, n_steps):
+    mujoco.mj_resetData(m, d)
+    d.qvel[dof:dof + 2] = speed * direction
+    mujoco.mj_step(m, d, nstep=n_steps)
+    return float((d.xpos[body, :2] - p_start) @ direction)
+
+
+def collision_course(ep, mask, r2, R, max_tries=40, speed_range=(0.2, 1.8), min_post=None):
+    """Ball 1 launched at t = 0 from a visible start so that it reaches ball 0's (solo) position at a
+    frame t* when ball 0 is in a hidden cell. The aim point is offset sideways by up to 0.6 of the
+    radius sum, so impacts range from head-on to glancing. Accepted only if the first contact is in
+    a hidden cell and a ball hidden at contact stays in hidden cells for at least `min_post` frames
+    (default MIN_POST_HIDDEN) afterwards, or until the episode ends, so the collision's outcome must
+    be remembered rather than seen. Returns (ball dict, plan dict) or None."""
+    min_post = MIN_POST_HIDDEN if min_post is None else min_post
+    b0, occ = ep["balls"][0], ep["occ"]
+    traj0, _ = rollout(dict(ep, balls=[b0]))
+    cand = [t for t in range(5, N_FRAMES - 5) if in_mask(traj0[t, 0], mask)]  # meet between 0.5 s and 7.5 s
+    if not cand:
+        return None
+    b1 = dict(radius=r2.uniform(*R["radius"]), mass=r2.uniform(*R["mass"]), mu_slide=r2.uniform(*R["mu_slide"]),
+              mu_roll=r2.uniform(*R["mu_roll"]), bouncy=bool(r2.random() < 0.5))
+    others = [b for k, b in enumerate(ep["balls"]) if k != 1]
+    for _ in range(max_tries):
+        t_star = cand[r2.integers(len(cand))]
+        ang, dist = r2.uniform(0, 2 * np.pi), r2.uniform(0.25, 0.7)
+        u = np.array([np.cos(ang), np.sin(ang)])  # from the aim point back toward the start
+        aim = traj0[t_star, 0] + r2.uniform(-0.6, 0.6) * (b0["radius"] + b1["radius"]) * np.array([-u[1], u[0]])
+        p1 = aim + dist * u
+        path = [p1 + s * (aim - p1) for s in np.linspace(0, 1, int(dist / 0.01) + 1)]
+        if not (np.abs(p1) <= HALF - b1["radius"] - 0.02).all() or in_mask(p1, mask) \
+                or any(inside_block(p, o, b1["radius"] + 0.01) for p in path for o in occ) \
+                or any(np.linalg.norm(p1 - b["p0"]) < b["radius"] + b1["radius"] + 0.02 for b in others):
+            continue
+        solo = dict(ep, balls=[dict(b1, p0=p1, v0=np.zeros(2))])
+        m = mujoco.MjModel.from_xml_string(build_xml(solo))
+        d = mujoco.MjData(m)
+        body = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "ball0")
+        dof, n_steps = m.body_dofadr[body], t_star * SUB
+        lo, hi = speed_range
+        if _travel(m, d, dof, body, p1, -u, hi, n_steps) < dist or _travel(m, d, dof, body, p1, -u, lo, n_steps) > dist:
+            continue
+        for _ in range(14):  # travelled distance at t* is monotone in launch speed
+            mid = 0.5 * (lo + hi)
+            lo, hi = (mid, hi) if _travel(m, d, dof, body, p1, -u, mid, n_steps) < dist else (lo, mid)
+        ball1 = dict(b1, p0=p1, v0=0.5 * (lo + hi) * -u)
+        trial = dict(ep, balls=[b0, ball1] + ep["balls"][2:])
+        pos, first = rollout(trial)
+        if first is None:
+            continue
+        fc, post = int(np.ceil(first[0] * FPS)), 0
+        for bi, c in ((0, first[1]), (1, first[2])):  # a ball hidden at contact must stay hidden afterwards
+            if in_mask(c, mask):
+                run = next((k for k, t in enumerate(range(fc, N_FRAMES)) if not in_mask(pos[t, bi], mask)), N_FRAMES - fc)
+                post = max(post, run)
+        if post >= min_post:
+            return ball1, dict(t_meet=t_star / FPS, t_contact=first[0], speed=0.5 * (lo + hi), post_frames=post)
+    return None
 
 
 def build_xml(ep, identical=False):
@@ -259,14 +377,14 @@ def simulate(ep, render=True, identical=False):
     return out
 
 
-def generate(split, n, out_path, start=0, render=True, identical=False, n_obj=None, ranges=None):
+def generate(split, n, out_path, start=0, render=True, identical=False, n_obj=None, ranges=None, version=GEN_VERSION):
     import pickle
     lo, hi = SEED_RANGES[split]
     eps = []
     for k in range(start, start + n):
         seed = lo + k
         assert seed < hi
-        ep = sample_episode(seed, n_obj=n_obj, ranges=ranges)
+        ep = sample_episode(seed, n_obj=n_obj, ranges=ranges, version=version)
         ep["sim"] = simulate(ep, render=render, identical=identical)
         eps.append(ep)
     with open(out_path, "wb") as f:
