@@ -11,3 +11,5 @@ results/b2_diag.log
 results/b2_diag_resume.log
 results/b2_diag_s200.log
 results/b2_diag_parts/
+# Slurm logs from cluster jobs
+cluster/logs/
