@@ -16,6 +16,16 @@ Jobs for this project run from their own checkout, `~/occlusion-memory`. They ne
 bash setup.sh
 ```
 
+Optional settings:
+
+- **`OM_MODULES`.** Modules that provide the Python, for example the cluster's Python 3.12 module. Setup loads them and records them in the virtualenv, and every job loads them again through `cluster/env.sh`. The virtualenv's interpreter belongs to the module and may not start without it. You can rerun setup on an existing checkout just to record them:
+
+  ```bash
+  OM_MODULES="<the Python 3.12 module>" bash ~/occlusion-memory/cluster/setup.sh
+  ```
+
+- **`TORCH_INDEX`.** Use it if the smoke test reports *CUDA unavailable*. PyPI's torch wheel is a CUDA 13 build, and it needs a recent driver. Point this at the PyTorch wheel index for the CUDA version that `nvidia-smi` on a GPU node reports, for example `https://download.pytorch.org/whl/cu128`, and rerun setup.
+
 ## GPU smoke test
 
 Runs on one H100 for about 5 minutes; the job's limit is 20 minutes.

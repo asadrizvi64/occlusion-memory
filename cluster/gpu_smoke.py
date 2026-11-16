@@ -112,8 +112,17 @@ class RecurrentImageModel(torch.nn.Module):
 
 
 OUT["train"] = {}
+if dev.type != "cuda" and not QUICK:  # the full benchmark on CPU would only burn the job's time limit
+    import subprocess
+    try:
+        drv = subprocess.run(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"], capture_output=True, text=True).stdout.strip()
+    except OSError:
+        drv = ""
+    OUT["train"] = dict(skipped=f"CUDA unavailable: torch built for CUDA {torch.version.cuda}, driver {drv or 'not found'}. "
+                                 "Install a torch build for the CUDA version the driver supports (setup.sh TORCH_INDEX).")
+    print(OUT["train"]["skipped"], flush=True)
 bsz, steps, T = (4, 3, 20) if QUICK else (32, 50, gen.N_FRAMES)
-for img in (64, 96):
+for img in (() if OUT["train"] else (64, 96)):
     torch.manual_seed(0)
     net = RecurrentImageModel(img).to(dev)
     opt = torch.optim.AdamW(net.parameters(), lr=3e-4)
