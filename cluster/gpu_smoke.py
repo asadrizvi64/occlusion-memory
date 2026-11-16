@@ -9,7 +9,8 @@ the throughput needed to plan the B3 rebuild (change 2) and the image-resolution
    be flat.
 3. Training throughput of a representative recurrent image model (per-frame CNN encoder, GRU, Gaussian head for
    two balls; 0.8M parameters, the scale planned for B3-RGB) at 64x64 and 96x96, bf16 autocast on GPU: steps/s, episodes/s,
-   peak memory, and the implied time for 10,000 episodes x 20 epochs.
+   peak memory, and the implied GPU compute time for 10,000 episodes x 20 epochs (data already on the GPU: no
+   loading or host-to-device copies, so this is a lower bound).
 
 Writes results/gpu_smoke_<SLURM_JOB_ID or "local">.json. --quick shrinks the benchmark for a CPU dry run.
 """
@@ -48,6 +49,8 @@ if dev.type == "cuda":
     env.update(gpu=p.name, gpu_mem_gb=round(p.total_memory / 1e9, 1), gpu_count=torch.cuda.device_count(),
                capability=f"{p.major}.{p.minor}", bf16=torch.cuda.is_bf16_supported())
     a = torch.randn(8192, 8192, device=dev, dtype=torch.bfloat16)
+    for _ in range(5):  # warm-up: cuBLAS initialisation and kernel selection
+        a @ a
     torch.cuda.synchronize()
     t0 = time.time()
     for _ in range(20):
@@ -67,20 +70,26 @@ OUT["render"] = {}
 for img in (64, 96):
     gen.IMG = img  # module constant read at simulate time; 64 is the generator's default
     ep = gen.sample_episode(seed, version=2)
-    t0 = time.time()
     try:
-        sim = gen.simulate(ep, render=True)
+        times = []
+        for _ in range(2):  # the first call also pays for creating the EGL context
+            t0 = time.time()
+            sim = gen.simulate(ep, render=True)
+            times.append(time.time() - t0)
+        t0 = time.time()
+        gen.simulate(ep, render=False)
+        t_norender = time.time() - t0
     except Exception as e:  # report and continue: the training benchmark does not need rendering
         OUT["render"][img] = dict(ok=False, error=f"{type(e).__name__}: {e}")
         print(f"{img}x{img}: FAILED {e}", flush=True)
         continue
-    dt = time.time() - t0
     rgb = sim["rgb"]
     nonbg = float((rgb.reshape(len(rgb), -1, 3).std(1).mean(-1) > 1).mean())  # share of frames that are not flat
     same_phys = ref is None or bool(np.array_equal(sim["pos"], ref))
     ref = sim["pos"] if ref is None else ref
     OUT["render"][img] = dict(ok=bool(rgb.shape == (gen.N_FRAMES, img, img, 3) and nonbg == 1.0 and same_phys),
-                              s_per_episode=round(dt, 2), frames_not_flat=nonbg, physics_same_as_64=same_phys,
+                              s_per_episode=round(times[1], 2), s_first_call=round(times[0], 2),
+                              s_without_render=round(t_norender, 2), frames_not_flat=nonbg, physics_same_as_64=same_phys,
                               mean_pixel=round(float(rgb.mean()), 1))
     print(f"{img}x{img}: {OUT['render'][img]}", flush=True)
 gen.IMG = 64
@@ -148,7 +157,7 @@ for img in (() if OUT["train"] else (64, 96)):
     sps = 1 / float(np.median(times))
     eps_s = sps * bsz * T / gen.N_FRAMES
     r = dict(batch=bsz, frames=T, params_m=round(sum(p.numel() for p in net.parameters()) / 1e6, 2), steps_per_s=round(sps, 2),
-             episodes_per_s=round(eps_s, 1), hours_10k_x20_epochs=round(10_000 * 20 / eps_s / 3600, 2),
+             episodes_per_s=round(eps_s, 1), gpu_s_10k_x20_epochs=round(10_000 * 20 / eps_s, 1),  # compute only, no data loading
              peak_mem_gb=round(torch.cuda.max_memory_allocated() / 1e9, 2) if dev.type == "cuda" else None,
              dataset_gb_10k_uint8=round(10_000 * gen.N_FRAMES * img * img * 3 / 1e9, 1))
     OUT["train"][img] = r

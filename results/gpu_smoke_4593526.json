@@ -1,0 +1,59 @@
+{
+ "quick": false,
+ "job": "4593526",
+ "node": "c116",
+ "env": {
+  "python": "3.12.3",
+  "torch": "2.15.0+cu132",
+  "cuda_build": "13.2",
+  "cuda_available": true,
+  "mujoco": "3.8.1",
+  "mujoco_gl": "egl",
+  "cpus": 64,
+  "slurm_cpus": "8",
+  "gpu": "NVIDIA H100",
+  "gpu_mem_gb": 100.0,
+  "gpu_count": 1,
+  "capability": "9.0",
+  "bf16": true,
+  "bf16_matmul_tflops": 40.5
+ },
+ "render": {
+  "64": {
+   "ok": true,
+   "s_per_episode": 2.28,
+   "frames_not_flat": 1.0,
+   "physics_same_as_64": true,
+   "mean_pixel": 124.7
+  },
+  "96": {
+   "ok": true,
+   "s_per_episode": 0.92,
+   "frames_not_flat": 1.0,
+   "physics_same_as_64": true,
+   "mean_pixel": 129.6
+  }
+ },
+ "train": {
+  "64": {
+   "batch": 32,
+   "frames": 80,
+   "params_m": 0.82,
+   "steps_per_s": 118.87,
+   "episodes_per_s": 3803.8,
+   "hours_10k_x20_epochs": 0.01,
+   "peak_mem_gb": 1.08,
+   "dataset_gb_10k_uint8": 9.8
+  },
+  "96": {
+   "batch": 32,
+   "frames": 80,
+   "params_m": 0.82,
+   "steps_per_s": 65.16,
+   "episodes_per_s": 2085.1,
+   "hours_10k_x20_epochs": 0.03,
+   "peak_mem_gb": 2.25,
+   "dataset_gb_10k_uint8": 22.1
+  }
+ }
+}

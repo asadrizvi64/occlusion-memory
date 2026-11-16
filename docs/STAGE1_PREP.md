@@ -7,7 +7,8 @@ The Stage 0 pilot report lists three changes to make before any confirmatory run
 | 1. Make events while hidden common | **Done: generator version 2** (below) |
 | 2. Rebuild the learned baseline (B3) | Not started |
 | 3. Re-run B2 with more particles or tempering | **Done: diagnosed; recommended B2 = 300 particles, roughening ×2** (below) |
-| Open decision: image resolution | Waiting on a decision |
+| GPU check on Capella | **Done: H100 works; GPU cost is not a constraint** (below) |
+| Open decision: image resolution | Waiting on a decision; compute no longer a factor (below) |
 
 ## Change 1: events while hidden (generator version 2)
 
@@ -383,3 +384,21 @@ These are inputs for the protocol freeze. No hypothesis, frozen metric or confir
 - **Unrecoverable velocity.** Velocity at the frame before each hidden period is 17–24 cm/s off for every method, including B1d. It comes from 1 cm noise at 10 Hz, and limits what any method can recover after a long occlusion.
 - **Runtime.** Times come from this 4-core container. The filter loops over MuJoCo states in Python; batched rollouts would cut the cost substantially.
 - **Sweep failure.** The first full sweep hung after the container's memory limit killed two pool workers. The fix (`ab9aed5`) changed memory handling only. The reproducibility tests confirm that the pilot's B2 and B1d predictions still reproduce bit for bit.
+
+## GPU check on Capella (before change 2)
+
+A 20-minute smoke job, not an experiment. Details are in [`cluster/README.md`](../cluster/README.md), the numbers in `results/gpu_smoke_4593526.json`.
+
+**What works:**
+- torch with CUDA on an H100.
+- MuJoCo rendering through EGL on the GPU node, at 64×64 and 96×96, with identical physics.
+- A virtualenv that starts in a clean, non-login shell.
+
+**Implications for the B3 rebuild (change 2) and the resolution decision:**
+
+- **GPU compute is negligible.** A 0.8M-parameter recurrent image model trains on 10,000 episodes × 20 epochs in about 1 minute at 64×64 and 1.6 minutes at 96×96. That is a lower bound: synthetic data already on the GPU. 96×96 costs 1.8× the compute of 64×64. Cost is therefore no reason to keep 64×64: the resolution decision can rest on whether the task is memory or perception.
+- **The whole dataset fits on the GPU.** 10,000 episodes take 9.8 GB at 64×64 and 22 GB at 96×96, and both together fit in the H100's 95 GB. Training can keep the uint8 frames resident, with no data loader.
+- **Generating episodes is the bottleneck.** It takes about 1 s per episode per core: physics and 9-ray visibility take about 0.8 s, rendering about 0.1 s. 10,000 episodes take about 20 minutes on 8 cores, or 5 minutes on 32.
+  - Rendering both resolutions from one physics run would avoid simulating twice. The generator renders one resolution per run today.
+  - The data belongs in a workspace, not the home directory.
+- **Several training seeds per learned model are affordable.** Training variance can be reported, which makes H1 comparisons against a learned baseline more trustworthy. How many seeds to use is a decision for the protocol freeze.

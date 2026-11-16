@@ -57,3 +57,22 @@ sacct -j <jobid> -X
 ## Account and partition
 
 `p_scads_mlhpc` on partition `capella`, set in the `.sbatch` headers.
+
+## First smoke test: job 4593526 (17 Nov 2026, node c116, commit 31e0d77)
+
+**Result:** passed. Full numbers are in `results/gpu_smoke_4593526.json`.
+
+| Check | Result |
+|---|---|
+| GPU | H100, 95.8 GB, driver 615.71.09. torch 2.15.0+cu132 sees CUDA; bf16 supported |
+| Rendering (EGL) | 64×64 and 96×96 both render. No frame is flat; physics is identical at both resolutions |
+| Training throughput, 64×64 | 119 steps/s (batch 32 × 80 frames), about 3,800 episodes/s, 1.1 GB peak |
+| Training throughput, 96×96 | 65 steps/s, about 2,090 episodes/s, 2.3 GB peak; 1.8× the cost of 64×64 |
+| 10,000 episodes × 20 epochs | about 53 s at 64×64, 96 s at 96×96 (GPU compute only) |
+| Dataset of 10,000 episodes (uint8) | 9.8 GB at 64×64, 22.1 GB at 96×96 |
+
+**Caveats on this run.** The script now fixes the first two:
+
+- The matmul benchmark (40.5 TFLOPS) ran without warm-up, so it mostly measured cuBLAS start-up.
+- The first render (64×64, 2.28 s) included creating the EGL context.
+- Training used synthetic data already on the GPU with a 0.8M-parameter model, so its times are lower bounds.
