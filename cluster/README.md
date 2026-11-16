@@ -16,15 +16,19 @@ Jobs for this project run from their own checkout, `~/occlusion-memory`. They ne
 bash setup.sh
 ```
 
-Optional settings:
+Settings:
 
-- **`OM_MODULES`.** Modules that provide the Python, for example the cluster's Python 3.12 module. Setup loads them and records them in the virtualenv, and every job loads them again through `cluster/env.sh`. The virtualenv's interpreter belongs to the module and may not start without it. You can rerun setup on an existing checkout just to record them:
+- **`OM_MODULES`.** Modules that provide Python 3.11 or later. On Capella:
 
   ```bash
-  OM_MODULES="<the Python 3.12 module>" bash ~/occlusion-memory/cluster/setup.sh
+  OM_MODULES="GCC/13.3.0 Python/3.12.3" bash setup.sh
   ```
 
-- **`TORCH_INDEX`.** Use it if the smoke test reports *CUDA unavailable*. PyPI's torch wheel is a CUDA 13 build, and it needs a recent driver. Point this at the PyTorch wheel index for the CUDA version that `nvidia-smi` on a GPU node reports, for example `https://download.pytorch.org/whl/cu128`, and rerun setup.
+  Setup records them in the virtualenv, and every job loads them through `cluster/env.sh`. This is required: the virtualenv's interpreter belongs to the module, and without it fails with `libpython3.12.so.1.0: cannot open shared object file`.
+  - Both scripts work from non-login shells, such as `ssh host 'sbatch …'`. `cluster/modules.sh` initializes Lmod when `module` is not defined.
+  - When modules are recorded but cannot be loaded, the job stops with an error instead of carrying on without them.
+  - Setup picks a Python 3.11+ interpreter itself after loading the modules (on Capella, `python3` stays the system 3.9). Set `PYTHON` only to override that choice.
+- **`TORCH_INDEX`.** Use it if the smoke test reports *CUDA unavailable*. PyPI's torch wheel is a CUDA 13 build, and it needs a recent driver. Point this at the PyTorch wheel index for the CUDA version that `nvidia-smi` on a GPU node reports, for example `https://download.pytorch.org/whl/cu128`, and rerun setup. The first smoke job found driver 615.71.09, so this is not needed now.
 
 ## GPU smoke test
 
