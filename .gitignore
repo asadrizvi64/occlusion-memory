@@ -13,3 +13,4 @@ results/b2_diag_s200.log
 results/b2_diag_parts/
 # Slurm logs from cluster jobs
 cluster/logs/
+results/collide_rate.log

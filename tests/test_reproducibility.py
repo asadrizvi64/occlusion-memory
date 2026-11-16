@@ -87,3 +87,41 @@ def test_particle_filter_options_smoke():
     assert np.array_equal(same[0], base[0], equal_nan=True)
     _, _, vel = B.kalman(z, 0.01, damp=1.0, rest=0.6, return_vel=True)
     assert vel.shape == base[0].shape
+
+
+def _balls_sha(ep):
+    import hashlib
+    h = hashlib.sha256()
+    for b in ep["balls"]:
+        for key in ("radius", "mass", "mu_slide", "mu_roll", "bouncy"):
+            h.update(np.float64(b[key]).tobytes())
+        h.update(np.asarray(b["p0"], np.float64).tobytes())
+        h.update(np.asarray(b["v0"], np.float64).tobytes())
+    return h.hexdigest()
+
+
+def test_v2_unchanged_since_change_3():
+    """Fingerprints recorded before version 3 was added (tests/data/gen_v2_fingerprint.json)."""
+    import json
+    fp = json.load(open("tests/data/gen_v2_fingerprint.json"))
+    for seed, ref in fp.items():
+        ep = gen.sample_episode(int(seed), version=2)
+        assert ep["mode"] == ref["mode"] and _balls_sha(ep) == ref["balls_sha256"], seed
+
+
+@pytest.mark.parametrize("k", [1, 2, 5, 6])  # collide-mode seeds; on k=2 version 2's choice fails the ray check
+def test_v3_collisions_are_hidden_on_the_labels(k):
+    e3 = gen.sample_episode(LO + k, version=3)
+    assert e3["mode"] == "collide"
+    post = gen.hidden_collision_post(gen.simulate(e3, render=False))
+    assert post >= gen.MIN_POST_HIDDEN and post == e3["collide_plan"]["post_frames_ray"]
+    e2 = gen.sample_episode(LO + k, version=2)
+    if gen.hidden_collision_post(gen.simulate(e2, render=False)) >= gen.MIN_POST_HIDDEN:  # v3 = v2 when v2 passes
+        assert _balls_sha(e2) == _balls_sha(e3)
+
+
+def test_p_collide_couples_episodes():
+    """The attempt is the first draw of the separate stream: forcing it gives the same collide-mode episode."""
+    for k in (1, 5):
+        assert _balls_sha(gen.sample_episode(LO + k, version=3)) == _balls_sha(gen.sample_episode(LO + k, version=3, p_collide=1.0))
+    assert gen.sample_episode(LO + 1, version=3, p_collide=0.0)["mode"] == "free"

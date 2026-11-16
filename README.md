@@ -34,7 +34,7 @@ Before any confirmatory run:
 
 | Path | Purpose |
 |---|---|
-| `gen.py` | Procedural MuJoCo benchmark: walled 1 m tabletop, 1–2 balls, screens (occlude only) and blocks (occlude and collide), per-episode camera, ray-cast visibility and hidden-region maps, event labels. `SEED_RANGES` fixes disjoint seeds per split. Version 2 (default) adds a collision-course mode for hidden collisions; `version=1` reproduces the pilot exactly. |
+| `gen.py` | Procedural MuJoCo benchmark: walled 1 m tabletop, 1–2 balls, screens (occlude only) and blocks (occlude and collide), per-episode camera, ray-cast visibility and hidden-region maps, event labels. `SEED_RANGES` fixes disjoint seeds per split. Version 2 adds a collision-course mode for hidden collisions. Version 3 (default) also checks each hidden collision against the 9-ray labels. `version=1` and `version=2` reproduce earlier data exactly. |
 | `baselines.py` | B0 last-seen, B1 constant-velocity Kalman, B1d damped Kalman with wall reflection, B2 MuJoCo particle filter (prior-sampled parameters, negative evidence from the hidden-region map), oracle-parameter filter, B3 GRU with Gaussian output. |
 | `make_pilot.py` | Generate pilot episodes: `python make_pilot.py <start> <n> <render 0/1> [version, default 1]`. |
 | `pilot_run.py` | Tune on the fit half, train the GRU, run every method on the eval half. |
@@ -42,6 +42,7 @@ Before any confirmatory run:
 | `make_figures.py` | Figures in `figures/`. |
 | `check_generator.py` | Generator version 1 vs 2 on the same pilot seeds: regression against the stored pilot, hidden-period labels, B1d vs B2 by label. Writes `results/generator_check.json`. |
 | `diag_collisions.py` | Hidden-collision diagnostic: frames hidden after contact, deflection, error before and after contact. Writes `results/collision_diag.csv`. |
+| `check_collide_rate.py` | Generator finalization. Compares collision-course rates 0.3/0.4/0.5 and versions 2 and 3 on 1,000 development seeds, using common random numbers. Reports label mix, hidden frames after contact and cost. Writes `results/collide_rate_*`. |
 | `b2_diagnostics.py` | Change 3: B2 variants (particle count, tempering, roughening scale, negative evidence, true parameters) against B1d. Scores error, energy score, coverage of Gaussian and particle-HPD regions, ESS and runtime. Checkpoints each job and resumes. Writes `results/b2_diag*_summary.json` and `results/b2_diag*_intervals.csv`. |
 | `b2_report.py` | Tables for the change 3 write-up, with paired episode-clustered intervals. Writes `results/b2_diag*_tables.md`. |
 | `tests/` | Reproducibility and smoke tests: `python -m pytest -q tests`. The version-1 generator and the pilot's B1d/B2 predictions must reproduce bit for bit. |

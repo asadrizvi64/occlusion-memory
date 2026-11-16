@@ -19,6 +19,13 @@ Generator versions (ep["gen_version"]):
      (scene, camera, ball 0) uses the same random draws as version 1, so the two versions
      differ only in ball 1 of collide-mode episodes. If no collision course is found the
      episode stays as in version 1 (ep["mode"] == "free", ep["collide_failed"] = True).
+  3  Version 2, with the acceptance checked against the labels themselves. A candidate that passes the
+     table-plane check is simulated with the 9-ray visibility used for labelling, and kept only if some
+     ball has a hidden period containing a ball-ball contact and stays hidden for at least
+     MIN_POST_HIDDEN frames from the contact frame on (the definition in diag_collisions.py). The
+     table-plane map is a cheap prefilter and disagrees with the rays near occluder edges, so version 2
+     still produced collision periods that end within 1-2 frames of the contact. Version 3 tries the
+     same candidates in the same order, so it equals version 2 whenever version 2's choice passes.
 
 Ground truth kept for supervision/evaluation only: positions, velocities, per-frame
 visible pixel count (segmentation render), contact events per frame, sampled parameters,
@@ -48,9 +55,9 @@ HALF = 0.5  # arena half-size (m)
 GRID = 0.02  # hidden-mask resolution (m)
 VIS_PX = 2  # a ball counts as visible with at least this many pixels
 EV = {"none": 0, "bounce": 1, "collision": 2}
-GEN_VERSION = 2
-P_COLLIDE = 0.5  # version 2: share of episodes that attempt a hidden collision course
-MIN_POST_HIDDEN = 5  # version 2: frames a ball hidden at contact must stay hidden after it (0 = no requirement)
+GEN_VERSION = 3
+P_COLLIDE = 0.5  # versions >= 2: share of episodes that attempt a hidden collision course
+MIN_POST_HIDDEN = 5  # versions >= 2: frames a ball hidden at contact must stay hidden after it (0 = no requirement)
 COLORS = [(0.85, 0.2, 0.15), (0.15, 0.35, 0.85), (0.2, 0.7, 0.3)]
 
 
@@ -97,10 +104,12 @@ def fit_dist(elev, azim, fovy=50.0, margin_px=2.0):
     raise RuntimeError("camera fit failed")
 
 
-def sample_episode(seed, n_obj=None, ranges=None, version=GEN_VERSION):
+def sample_episode(seed, n_obj=None, ranges=None, version=GEN_VERSION, p_collide=None):
     """Occluders and camera first; then the hidden region is found by ray casting, and ball 0 is
     launched toward a random hidden cell, so most episodes contain an occlusion. Version 2 may then
-    replace ball 1 with one on a collision course (see the module docstring)."""
+    replace ball 1 with one on a collision course (see the module docstring). p_collide overrides
+    P_COLLIDE; the attempt is decided by the first draw of the separate stream, so for a given seed the
+    collide-mode episode is the same at every p_collide that selects it."""
     r = np.random.default_rng(seed)
     R = dict(mass=(0.1, 1.0), mu_slide=(0.05, 0.4), mu_roll=(0.0002, 0.002), speed=(0.3, 1.5),
              radius=(0.02, 0.04), elev=(50.0, 70.0), azim=(-15.0, 15.0))
@@ -159,8 +168,8 @@ def sample_episode(seed, n_obj=None, ranges=None, version=GEN_VERSION):
     ep["gen_version"], ep["mode"] = version, "free"
     if version >= 2:
         r2 = np.random.default_rng([seed, 2])  # separate stream: version-1 draws above stay identical
-        if r2.random() < P_COLLIDE:
-            found = collision_course(ep, mask, r2, R)
+        if r2.random() < (P_COLLIDE if p_collide is None else p_collide):
+            found = collision_course(ep, mask, r2, R, verify=version >= 3)
             if found is None:
                 ep["collide_failed"] = True
             else:
@@ -209,13 +218,15 @@ def _travel(m, d, dof, body, p_start, direction, speed, n_steps):
     return float((d.xpos[body, :2] - p_start) @ direction)
 
 
-def collision_course(ep, mask, r2, R, max_tries=40, speed_range=(0.2, 1.8), min_post=None):
+def collision_course(ep, mask, r2, R, max_tries=40, speed_range=(0.2, 1.8), min_post=None, verify=False):
     """Ball 1 launched at t = 0 from a visible start so that it reaches ball 0's (solo) position at a
     frame t* when ball 0 is in a hidden cell. The aim point is offset sideways by up to 0.6 of the
     radius sum, so impacts range from head-on to glancing. Accepted only if the first contact is in
     a hidden cell and a ball hidden at contact stays in hidden cells for at least `min_post` frames
     (default MIN_POST_HIDDEN) afterwards, or until the episode ends, so the collision's outcome must
-    be remembered rather than seen. Returns (ball dict, plan dict) or None."""
+    be remembered rather than seen. With verify=True (version 3) a candidate that passes is also
+    simulated with ray visibility and must pass the same test on the labels (hidden_collision_post).
+    Returns (ball dict, plan dict) or None."""
     min_post = MIN_POST_HIDDEN if min_post is None else min_post
     b0, occ = ep["balls"][0], ep["occ"]
     traj0, _ = rollout(dict(ep, balls=[b0]))
@@ -258,8 +269,35 @@ def collision_course(ep, mask, r2, R, max_tries=40, speed_range=(0.2, 1.8), min_
                 run = next((k for k, t in enumerate(range(fc, N_FRAMES)) if not in_mask(pos[t, bi], mask)), N_FRAMES - fc)
                 post = max(post, run)
         if post >= min_post:
-            return ball1, dict(t_meet=t_star / FPS, t_contact=first[0], speed=0.5 * (lo + hi), post_frames=post)
+            plan = dict(t_meet=t_star / FPS, t_contact=first[0], speed=0.5 * (lo + hi), post_frames=post)
+            if verify:
+                plan["post_frames_ray"] = hidden_collision_post(simulate(trial, render=False))
+                if plan["post_frames_ray"] < min_post:
+                    continue
+            return ball1, plan
     return None
+
+
+def hidden_collision_post(sim):
+    """Hidden frames after a ball-ball contact, from the labels: over balls and their hidden periods
+    (ray-based, frame 0 never hidden) that contain a contact, the largest count of frames from the
+    first contact frame to the period's end, inclusive. 0 if no hidden period contains a contact."""
+    hid = ~sim["visible"]
+    hid[0] = False
+    best = 0
+    for i in range(hid.shape[1]):
+        t = 1
+        while t < hid.shape[0]:
+            if not hid[t, i]:
+                t += 1
+                continue
+            a = t
+            while t < hid.shape[0] and hid[t, i]:
+                t += 1
+            hit = np.nonzero(sim["event"][a:t, i] == EV["collision"])[0]
+            if len(hit):
+                best = max(best, t - (a + int(hit[0])))
+    return best
 
 
 def build_xml(ep, identical=False):
