@@ -11,8 +11,9 @@ Inputs:
   rgb+meas   RGB plus the oracle noisy positions B1d receives (1 cm, visible balls only). A diagnostic, not a
              baseline: comparing it with rgb separates perception error from memory error (the spec's ablation for M).
 
-Loss: beta-NLL (Seitzer et al. 2022, beta = 0.5, their default) of the true position, every frame from t = 1, each
-ball present; with the plain NLL the predicted variance grows and the mean stops learning (see STAGE1_PREP.md). Hidden frames
+Loss: beta-NLL (Seitzer et al. 2022; beta = 0.5, their recommended default, not tuned) of the true position, every
+frame from t = 1, each ball present. In a CPU overfitting check (16 episodes, 300 steps) both it and the plain NLL
+learned to localise the balls; beta = 0.5 got further (visible-frame error 4.3 vs 6.7 cm). Hidden frames
 are weighted so that hidden and visible frames carry equal total weight on the training set (w_hidden = visible
 frames / hidden frames, fixed by that rule, not tuned). Checkpoint selection: the weighted plain NLL on the val block.
 Hyperparameters are fixed in advance (no tuning trials yet; the spec allows 20 per learned model).

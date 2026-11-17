@@ -26,7 +26,7 @@ The research spec and the Stage 0 pilot report live in [`docs/`](docs/):
 Before any confirmatory run:
 
 1. ~~Make events while hidden common: at least 40% of hidden periods with an event, at least 10% with a collision.~~ Done in generator version 2: 53% events, 36% collisions on 200 pilot seeds ([log](docs/STAGE1_PREP.md)).
-2. Rebuild the learned baseline (B3): hidden-weighted loss, 10k episodes, scene information.
+2. Rebuild the learned baseline (B3): hidden-weighted loss, 10k episodes, scene information. Code ready and tested on CPU; the cluster run (`cluster/submit_b3.sh`, about 2.5 GPU-hours) waits for a go-ahead ([log](docs/STAGE1_PREP.md#change-2-rebuild-the-learned-baseline-b3-rgb)).
 3. ~~Re-run B2 with more particles or tempering.~~ Done: B2's overconfidence and its pre-contact gap to B1d come mainly from sample impoverishment (no process noise beyond roughening), not particle count. Roughening ×2 at 100 particles matches 500 particles at a fifth of the cost. Recommended B2 for Stage 1: 300 particles with roughening ×2, which is 3.0 cm better than B1d on fresh development episodes and 5.6 cm (38%) better after a hidden contact ([log](docs/STAGE1_PREP.md#change-3-why-b2-is-overconfident-and-worse-than-b1d-before-a-contact)).
 4. Decide the image resolution: 64×64 vs 96×96, or larger balls.
 
@@ -43,6 +43,9 @@ Before any confirmatory run:
 | `check_generator.py` | Generator version 1 vs 2 on the same pilot seeds: regression against the stored pilot, hidden-period labels, B1d vs B2 by label. Writes `results/generator_check.json`. |
 | `diag_collisions.py` | Hidden-collision diagnostic: frames hidden after contact, deflection, error before and after contact. Writes `results/collision_diag.csv`. |
 | `check_collide_rate.py` | Generator finalization. Compares collision-course rates 0.3/0.4/0.5 and versions 2 and 3 on 1,000 development seeds, using common random numbers. Reports label mix, hidden frames after contact and cost. Writes `results/collide_rate_*`. |
+| `make_rgb_data.py` | Change 2 data: version-3 development blocks (train 10,000, val 500, eval 1,000) rendered at 64×64 and 96×96 with identical physics, in resumable shards. |
+| `b3_rgb.py` | B3-RGB: shared RGB encoder, GRU and full-covariance Gaussian head (2.3M parameters), trained with β-NLL and hidden frames weighted. Inputs `rgb` or `rgb+meas` (diagnostic). |
+| `b3_eval.py`, `periods.py` | Score B3 runs and B1d per hidden period. Short collision periods (≤ 2 hidden frames after the contact) are reported separately. |
 | `b2_diagnostics.py` | Change 3: B2 variants (particle count, tempering, roughening scale, negative evidence, true parameters) against B1d. Scores error, energy score, coverage of Gaussian and particle-HPD regions, ESS and runtime. Checkpoints each job and resumes. Writes `results/b2_diag*_summary.json` and `results/b2_diag*_intervals.csv`. |
 | `b2_report.py` | Tables for the change 3 write-up, with paired episode-clustered intervals. Writes `results/b2_diag*_tables.md`. |
 | `tests/` | Reproducibility and smoke tests: `python -m pytest -q tests`. The version-1 generator and the pilot's B1d/B2 predictions must reproduce bit for bit. |

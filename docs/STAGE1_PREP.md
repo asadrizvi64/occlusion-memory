@@ -471,3 +471,63 @@ Settings are compared on common random numbers. The first draw of each seed's se
 - Label counts depend on the camera and occluder priors, which are unchanged since version 1.
 - The 190-period guide comes from the pilot's overall comparison, not a per-label power analysis.
 - Model errors were not computed. The rate changes the label mix, not the episodes within a label: at a lower rate, the same episodes simply have fewer collision attempts.
+
+## Change 2: rebuild the learned baseline (B3-RGB)
+
+**Status.** The code is written and tested on CPU. The cluster run waits for the user's go-ahead.
+- No workspace has been created and nothing has been submitted.
+- The job list and GPU-hour estimate are in [`cluster/README.md`](../cluster/README.md#b3-rebuild-change-2-job-chain-not-yet-submitted).
+
+**Goal.** From the pilot report: a fair learned baseline, trained on 10,000 episodes, with hidden frames weighted in its loss and the same scene information as the other methods. It must at least match B1d on no-event periods before it counts as strong.
+
+The same runs also answer the open resolution question, 64×64 or 96×96.
+
+### Design
+
+- **Data** (`make_rgb_data.py`). Generator version 3 at rate 0.3, development seeds of the pilot range only, disjoint from all earlier work:
+  - train: indices 20,000–29,999 (10,000 episodes);
+  - val: 30,000–30,499 (500), used for checkpoint selection;
+  - eval: 31,000–31,999 (1,000), used for the decision.
+
+  Each episode is rendered at 64×64 and 96×96 from the same camera and physics (`gen.render_frames`), so the two resolutions differ only in pixel count. No confirmatory seed range is touched.
+- **Model** (`b3_rgb.py`), 2.32M parameters (the spec allows 1–5M):
+  - a per-frame RGB encoder (`RGBEncoder`), meant to be shared by all learned models as the spec requires;
+  - a causal GRU, so the estimate at frame t uses frames up to t only, like the filters;
+  - a full-covariance Gaussian over each ball's position.
+
+  Ball *i* is the ball drawn in colour *i*.
+  - This is the deterministic recurrent variant. The spec describes B3 as "DreamerV3-style" (stochastic latent, image reconstruction); which one Stage 1 uses is for the protocol freeze.
+- **Inputs:**
+  - `rgb`: the B3 candidate.
+  - `rgb+meas`: RGB plus the oracle noisy positions that B1d receives. It is a diagnostic, not a baseline: comparing it with `rgb` separates perception error from memory error, which is what the resolution decision turns on.
+- **Loss:**
+  - β-NLL (Seitzer et al., ICLR 2022), β = 0.5, the paper's default.
+  - Hidden frames are weighted so that hidden and visible frames carry equal total weight (visible / hidden frame count on the training set, about 3.5).
+  - Hyperparameters are fixed in advance; no tuning trials have been used (the spec allows 20 per learned model).
+  - Checkpoint: the lowest weighted plain NLL on val.
+- **Grid:** 2 resolutions × 2 inputs × 3 seeds = 12 runs of 20 epochs.
+- **Evaluation** (`b3_eval.py`):
+  - Same per-period scores as change 3, against B1d with its pilot tuning, plus visible-frame error.
+  - Seeds are averaged per period, and their spread is reported.
+  - **Short collision periods (hidden ≤ 2 frames from the contact on) are always a separate group** (`periods.py`), next to `collision_long`.
+
+### CPU checks done
+
+- `render_frames` reproduces `simulate`'s 64×64 frames bit for bit, and the trajectory at 96×96 exactly.
+- The data pipeline produced 3 small blocks (128 episodes) at both resolutions, wrote shards, resumed correctly and recorded label counts in the manifests.
+- All four variants trained for 2 epochs, saved checkpoints and wrote predictions. The evaluation scored them with B1d and produced every table, including `collision_short`.
+- **Learning check.** Overfitting 16 episodes for 300 steps reduced visible-frame error from 43 to 4.3 cm and hidden-frame error from 26 to 2.6 cm. The model localizes the balls, so the colour-to-slot mapping, the coordinates and the loss are wired correctly.
+- 24 tests pass (`tests/`). They cover the rendering identity, the label split, the loss against the closed-form Gaussian NLL, the spec's size limits and a two-episode pipeline.
+
+### Decision rules, proposed before any result (for the user to confirm)
+
+1. **B3 is strong** if it is not significantly worse than B1d on no-event periods: the 95% interval of B1d − B3-rgb on those periods reaches 0 or above.
+2. **Use 96×96** if, for B3-rgb, the paired 64×64 − 96×96 difference in mean hidden error over all periods has a 95% interval above 0 **and** is at least 10% of the 64×64 error. Otherwise keep the spec's 64×64.
+   - Diagnostics, reported with the rule: visible-frame error and the rgb − rgb+meas gap at each resolution.
+
+### Limitations
+
+- **B1d's advantage.** B1d gets oracle measurements (1 cm noise), while B3-rgb must perceive from pixels. Rule 1 therefore favours B1d; in Stage 1, B1d will get detector outputs instead.
+- **Run size.** One eval block of 1,000 development episodes and 3 seeds per variant.
+- **Estimated cost.** The training time is FLOP-scaled from the smoke test, not measured. Even 3× slower stays under 6 GPU-hours.
+- **Learning check.** It used 16 episodes on CPU; it shows that the model can learn, not how well it generalizes.
