@@ -8,7 +8,8 @@ the free episode (no attempt) and, if u < 0.5, the attempted episode under versi
 rate P is the attempted one if u < P, else the free one. All settings are compared on common random numbers,
 and a setting with a lower rate is the same episodes with some attempts switched off.
 
-Per setting: hidden periods per 1,000 episodes by label, event and collision shares (95% intervals, bootstrap
+Per setting: hidden periods per 1,000 episodes by label (collision periods also split into short, hidden for at
+most 2 frames from the contact on, and long), event and collision shares (95% intervals, bootstrap
 clustered by episode), hidden frames after the contact in collision periods, collision-course success,
 generation cost (sampling + physics + visibility, no rendering, one core).
 
@@ -28,6 +29,7 @@ import pilot_analyze as PA
 LO = gen.SEED_RANGES["pilot"][0]
 RATES = (0.3, 0.4, 0.5)
 B_BOOT = 2000
+SHORT = 2  # a collision period is 'short' if the ball is hidden for at most this many frames from the contact on
 
 
 def periods(ep, sim):
@@ -93,6 +95,8 @@ def summarize(res, ver, rate, rng):
     return dict(
         n_episodes=n, episodes_with_hidden_period=int((tot > 0).sum()), hidden_periods=int(tot.sum()),
         per_1000={l: round(1000 * cnt[l].sum() / n, 1) for l in labs}, per_1000_all=round(1000 * tot.sum() / n, 1),
+        per_1000_collision_short=round(1000 * int((post <= SHORT).sum()) / n, 1),  # hidden <= 2 frames after contact
+        per_1000_collision_long=round(1000 * int((post > SHORT).sum()) / n, 1),
         share={l: round(float(cnt[l].sum() / tot.sum()), 3) for l in labs},
         event_share=boot_share(cnt["bounce"] + cnt["collision"], tot, rng), collision_share=boot_share(cnt["collision"], tot, rng),
         collision_post=dict(n=len(col), median=float(np.median(post)) if len(col) else None,
@@ -128,12 +132,13 @@ def main(n=1000, workers=4):
 
 def print_table(S):
     print(f"\n{S['n_episodes']} episodes, pilot seeds {S['seeds'][0]}-{S['seeds'][1]}")
-    print(f"{'setting':26s} {'per1000':>7s} {'none':>6s} {'stop':>6s} {'bnc':>6s} {'coll':>6s}  {'event share':>20s} {'collision share':>20s} "
+    print(f"{'setting':26s} {'per1000':>7s} {'none':>6s} {'stop':>6s} {'bnc':>6s} {'coll':>6s} {'long':>5s} {'short':>5s}  {'event share':>20s} {'collision share':>20s} "
           f"{'post med':>8s} {'<=2':>5s} {'>=5':>5s} {'succ':>9s} {'s/ep':>5s}")
     for name, d in S["settings"].items():
         cp, p = d["collision_post"], d["per_1000"]
         es, cs = d["event_share"], d["collision_share"]
-        print(f"{name:26s} {d['per_1000_all']:7.0f} {p['none']:6.0f} {p['stopped']:6.0f} {p['bounce']:6.0f} {p['collision']:6.0f}  "
+        print(f"{name:26s} {d['per_1000_all']:7.0f} {p['none']:6.0f} {p['stopped']:6.0f} {p['bounce']:6.0f} {p['collision']:6.0f} "
+              f"{d['per_1000_collision_long']:5.0f} {d['per_1000_collision_short']:5.0f}  "
               f"{es[0]:.2f} [{es[1]:.2f}, {es[2]:.2f}]   {cs[0]:.2f} [{cs[1]:.2f}, {cs[2]:.2f}]   "
               f"{cp['median'] if cp['median'] is not None else float('nan'):8.0f} {cp['share_le2'] or 0:5.2f} {cp['share_ge5'] or 0:5.2f} "
               f"{d['successes']:4d}/{d['attempts']:<4d} {d['gen_s_per_episode']:5.2f}")

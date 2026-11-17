@@ -109,7 +109,7 @@ def test_v2_unchanged_since_change_3():
         assert ep["mode"] == ref["mode"] and _balls_sha(ep) == ref["balls_sha256"], seed
 
 
-@pytest.mark.parametrize("k", [1, 2, 5, 6])  # collide-mode seeds; on k=2 version 2's choice fails the ray check
+@pytest.mark.parametrize("k", [2, 5, 6])  # collide-mode seeds at rate 0.3; on k=2 version 2's choice fails the ray check
 def test_v3_collisions_are_hidden_on_the_labels(k):
     e3 = gen.sample_episode(LO + k, version=3)
     assert e3["mode"] == "collide"
@@ -122,6 +122,9 @@ def test_v3_collisions_are_hidden_on_the_labels(k):
 
 def test_p_collide_couples_episodes():
     """The attempt is the first draw of the separate stream: forcing it gives the same collide-mode episode."""
-    for k in (1, 5):
+    for k in (2, 5):
         assert _balls_sha(gen.sample_episode(LO + k, version=3)) == _balls_sha(gen.sample_episode(LO + k, version=3, p_collide=1.0))
-    assert gen.sample_episode(LO + 1, version=3, p_collide=0.0)["mode"] == "free"
+    assert gen.sample_episode(LO + 2, version=3, p_collide=0.0)["mode"] == "free"
+    # seed index 1 draws u = 0.455: no attempt at version 3's rate 0.3, the same collision course at 0.5
+    assert gen.sample_episode(LO + 1, version=3)["mode"] == "free"
+    assert _balls_sha(gen.sample_episode(LO + 1, version=3, p_collide=0.5)) == _balls_sha(gen.sample_episode(LO + 1, version=3, p_collide=1.0))

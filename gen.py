@@ -11,7 +11,7 @@ randomly, which creates collision opportunities, sometimes behind an occluder.
 
 Generator versions (ep["gen_version"]):
   1  Stage 0 pilot generator. Kept bit-identical so the pilot regenerates from its seeds.
-  2  Adds a collision-course mode (ep["mode"] == "collide") in P_COLLIDE of episodes: ball 1
+  2  Adds a collision-course mode (ep["mode"] == "collide") in P_COLLIDE[2] = 50% of episodes: ball 1
      is launched from a visible start so that it meets ball 0 while ball 0 is inside the hidden
      region. The meeting is timed by bisection on ball 1's launch speed and accepted only if a
      physics-only rollout puts the first ball-ball contact in a hidden cell and keeps a ball that
@@ -26,6 +26,7 @@ Generator versions (ep["gen_version"]):
      table-plane map is a cheap prefilter and disagrees with the rays near occluder edges, so version 2
      still produced collision periods that end within 1-2 frames of the contact. Version 3 tries the
      same candidates in the same order, so it equals version 2 whenever version 2's choice passes.
+     It attempts a collision course in P_COLLIDE[3] = 30% of episodes (a subset of version 2's 50%).
 
 Ground truth kept for supervision/evaluation only: positions, velocities, per-frame
 visible pixel count (segmentation render), contact events per frame, sampled parameters,
@@ -56,7 +57,8 @@ GRID = 0.02  # hidden-mask resolution (m)
 VIS_PX = 2  # a ball counts as visible with at least this many pixels
 EV = {"none": 0, "bounce": 1, "collision": 2}
 GEN_VERSION = 3
-P_COLLIDE = 0.5  # versions >= 2: share of episodes that attempt a hidden collision course
+P_COLLIDE = {2: 0.5, 3: 0.3}  # share of episodes that attempt a hidden collision course, by version (3: chosen
+#                               after check_collide_rate.py, see docs/STAGE1_PREP.md; 2 stays 0.5 so it reproduces)
 MIN_POST_HIDDEN = 5  # versions >= 2: frames a ball hidden at contact must stay hidden after it (0 = no requirement)
 COLORS = [(0.85, 0.2, 0.15), (0.15, 0.35, 0.85), (0.2, 0.7, 0.3)]
 
@@ -168,7 +170,7 @@ def sample_episode(seed, n_obj=None, ranges=None, version=GEN_VERSION, p_collide
     ep["gen_version"], ep["mode"] = version, "free"
     if version >= 2:
         r2 = np.random.default_rng([seed, 2])  # separate stream: version-1 draws above stay identical
-        if r2.random() < (P_COLLIDE if p_collide is None else p_collide):
+        if r2.random() < (P_COLLIDE[version] if p_collide is None else p_collide):
             found = collision_course(ep, mask, r2, R, verify=version >= 3)
             if found is None:
                 ep["collide_failed"] = True
@@ -413,6 +415,33 @@ def simulate(ep, render=True, identical=False):
     if render:
         out["rgb"] = rgb
     return out
+
+
+def render_frames(ep, size, identical=False):
+    """RGB frames of an episode at another image size: same camera, same physics as simulate() (same model,
+    same initial state, same steps), so the scene and view are identical and only the pixel count changes.
+    Returns (rgb (N_FRAMES, size, size, 3) uint8, ball positions (N_FRAMES, n, 3) float32); callers compare the
+    positions with simulate()'s to confirm the trajectory. simulate() itself is unchanged."""
+    m = mujoco.MjModel.from_xml_string(build_xml(ep, identical))
+    m.vis.global_.offwidth, m.vis.global_.offheight = max(m.vis.global_.offwidth, size), max(m.vis.global_.offheight, size)
+    d = mujoco.MjData(m)
+    n = len(ep["balls"])
+    bbody = [mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, f"ball{i}") for i in range(n)]
+    for i, b in enumerate(ep["balls"]):
+        d.qvel[m.body_dofadr[bbody[i]]:m.body_dofadr[bbody[i]] + 2] = b["v0"]
+    mujoco.mj_forward(m, d)
+    rgb = np.zeros((N_FRAMES, size, size, 3), np.uint8)
+    pos = np.zeros((N_FRAMES, n, 3), np.float32)
+    rend = mujoco.Renderer(m, size, size)
+    for t in range(N_FRAMES):
+        if t > 0:
+            for _ in range(SUB):  # one step at a time, as in simulate()
+                mujoco.mj_step(m, d)
+        pos[t] = d.xpos[bbody]
+        rend.update_scene(d, camera="cam")
+        rgb[t] = rend.render()
+    rend.close()
+    return rgb, pos
 
 
 def generate(split, n, out_path, start=0, render=True, identical=False, n_obj=None, ranges=None, version=GEN_VERSION):

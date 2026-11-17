@@ -17,6 +17,8 @@
     "collision": 22.0
    },
    "per_1000_all": 902.0,
+   "per_1000_collision_short": 4.0,
+   "per_1000_collision_long": 18.0,
    "share": {
     "none": 0.598,
     "stopped": 0.123,
@@ -41,7 +43,7 @@
    },
    "attempts": 0,
    "successes": 0,
-   "gen_s_per_episode": 0.7,
+   "gen_s_per_episode": 0.8,
    "gen_s_per_attempted_episode": null
   },
   "v2, P=0.5 (change 1)": {
@@ -55,6 +57,8 @@
     "collision": 496.0
    },
    "per_1000_all": 1151.0,
+   "per_1000_collision_short": 78.0,
+   "per_1000_collision_long": 418.0,
    "share": {
     "none": 0.351,
     "stopped": 0.072,
@@ -79,8 +83,8 @@
    },
    "attempts": 532,
    "successes": 297,
-   "gen_s_per_episode": 0.81,
-   "gen_s_per_attempted_episode": 0.9
+   "gen_s_per_episode": 0.94,
+   "gen_s_per_attempted_episode": 1.05
   },
   "v3, P=0.3": {
    "n_episodes": 1000,
@@ -93,6 +97,8 @@
     "collision": 296.0
    },
    "per_1000_all": 1039.0,
+   "per_1000_collision_short": 38.0,
+   "per_1000_collision_long": 258.0,
    "share": {
     "none": 0.446,
     "stopped": 0.087,
@@ -117,8 +123,8 @@
    },
    "attempts": 308,
    "successes": 164,
-   "gen_s_per_episode": 0.92,
-   "gen_s_per_attempted_episode": 1.42
+   "gen_s_per_episode": 1.06,
+   "gen_s_per_attempted_episode": 1.64
   },
   "v3, P=0.4": {
    "n_episodes": 1000,
@@ -131,6 +137,8 @@
     "collision": 394.0
    },
    "per_1000_all": 1088.0,
+   "per_1000_collision_short": 52.0,
+   "per_1000_collision_long": 342.0,
    "share": {
     "none": 0.401,
     "stopped": 0.075,
@@ -155,8 +163,8 @@
    },
    "attempts": 417,
    "successes": 225,
-   "gen_s_per_episode": 1.0,
-   "gen_s_per_attempted_episode": 1.42
+   "gen_s_per_episode": 1.16,
+   "gen_s_per_attempted_episode": 1.66
   },
   "v3, P=0.5": {
    "n_episodes": 1000,
@@ -169,6 +177,8 @@
     "collision": 491.0
    },
    "per_1000_all": 1133.0,
+   "per_1000_collision_short": 66.0,
+   "per_1000_collision_long": 425.0,
    "share": {
     "none": 0.35,
     "stopped": 0.068,
@@ -193,8 +203,8 @@
    },
    "attempts": 532,
    "successes": 284,
-   "gen_s_per_episode": 1.09,
-   "gen_s_per_attempted_episode": 1.42
+   "gen_s_per_episode": 1.26,
+   "gen_s_per_attempted_episode": 1.65
   }
  },
  "check_change1_first200": {

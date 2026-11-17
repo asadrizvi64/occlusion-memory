@@ -5,9 +5,9 @@ The Stage 0 pilot report lists three changes to make before any confirmatory run
 | Change | Status |
 |---|---|
 | 1. Make events while hidden common | **Done: generator version 2** (below) |
-| 2. Rebuild the learned baseline (B3) | Not started |
+| 2. Rebuild the learned baseline (B3) | **Code ready and tested on CPU; cluster run waiting for the go-ahead** (below) |
 | 3. Re-run B2 with more particles or tempering | **Done: diagnosed; recommended B2 = 300 particles, roughening ×2** (below) |
-| Generator finalization: version 3 and collision rate | **Done: version 3 implemented; rate 0.3 recommended, awaiting decision** (below) |
+| Generator finalization: version 3 and collision rate | **Done: version 3, rate 0.3 (decided 17 Nov)** (below) |
 | GPU check on Capella | **Done: H100 works; GPU cost is not a constraint** (below) |
 | Open decision: image resolution | Waiting on a decision; compute no longer a factor (below) |
 
@@ -447,24 +447,24 @@ Whether such periods should count as "collision" is a labelling question for the
 
 Settings are compared on common random numbers. The first draw of each seed's separate stream decides whether it attempts a collision course, so a lower rate gives the same episodes with some attempts switched off.
 
-| Setting | Hidden periods per 1,000 episodes | No event | Stopped | Bounce | Collision | Event share | Collision share | Cost per episode |
-|---|---|---|---|---|---|---|---|---|
-| Version 1 (pilot) | 902 | 539 | 111 | 230 | 22 | 0.28 [0.25, 0.31] | 0.02 [0.01, 0.04] | 0.70 s |
-| Version 2, rate 0.5 (change 1) | 1,151 | 404 | 83 | 168 | 496 | 0.58 [0.54, 0.61] | 0.43 [0.40, 0.46] | 0.81 s |
-| **Version 3, rate 0.3** | 1,039 | 463 | 90 | 190 | 296 | **0.47 [0.43, 0.50]** | **0.28 [0.25, 0.32]** | 0.92 s |
-| Version 3, rate 0.4 | 1,088 | 436 | 82 | 176 | 394 | 0.52 [0.49, 0.56] | 0.36 [0.32, 0.40] | 1.00 s |
-| Version 3, rate 0.5 | 1,133 | 397 | 77 | 168 | 491 | 0.58 [0.55, 0.61] | 0.43 [0.40, 0.47] | 1.09 s |
+| Setting | Hidden periods per 1,000 episodes | No event | Stopped | Bounce | Collision: long | Collision: short (≤ 2 frames) | Event share | Collision share | Cost per episode |
+|---|---|---|---|---|---|---|---|---|---|
+| Version 1 (pilot) | 902 | 539 | 111 | 230 | 18 | 4 | 0.28 [0.25, 0.31] | 0.02 [0.01, 0.04] | 0.70 s |
+| Version 2, rate 0.5 (change 1) | 1,151 | 404 | 83 | 168 | 418 | 78 | 0.58 [0.54, 0.61] | 0.43 [0.40, 0.46] | 0.81 s |
+| **Version 3, rate 0.3 (chosen)** | 1,039 | 463 | 90 | 190 | **258** | **38** | **0.47 [0.43, 0.50]** | **0.28 [0.25, 0.32]** | 0.92 s |
+| Version 3, rate 0.4 | 1,088 | 436 | 82 | 176 | 342 | 52 | 0.52 [0.49, 0.56] | 0.36 [0.32, 0.40] | 1.00 s |
+| Version 3, rate 0.5 | 1,133 | 397 | 77 | 168 | 425 | 66 | 0.58 [0.55, 0.61] | 0.43 [0.40, 0.47] | 1.09 s |
 
-Shares have 95% intervals from a bootstrap clustered by episode. Sanity check: version 2 at rate 0.5 on the first 200 seeds reproduces change 1 exactly (222 periods, 80 collisions).
+"Short" collision periods are those where the ball is hidden for at most 2 frames from the contact on; "long" are the rest. From here on, results always report the two separately. The event and collision shares count both. Shares have 95% intervals from a bootstrap clustered by episode. Costs are from the first run; a rerun that added the short/long split shared the CPUs with other work, so `collide_rate_summary.json` shows timings about 15% higher. Sanity check: version 2 at rate 0.5 on the first 200 seeds reproduces change 1 exactly (222 periods, 80 collisions).
 
-**Recommendation: version 3 at rate 0.3.** The decision is the user's.
+**Decision (17 Nov): version 3 at rate 0.3.** It is now the generator default: `P_COLLIDE = {2: 0.5, 3: 0.3}`, so version 2 still reproduces. The reasons, as recommended:
 - **Targets.** All three rates meet the pilot report's targets (at least 40% events, at least 10% collisions). Rate 0.3 meets them with margin: events 47% [43, 50], collisions 28%.
 - **Balance.** Rate 0.3 gives the most balanced mix: no label above 45% of periods, collisions 28%. At 0.5, collisions are 43% of periods and dominate any average over all periods.
 - **Labels per test split.** A 1,000-episode split at rate 0.3 contains about 460 no-event, 190 bounce and 300 collision periods. The pilot's power estimate needed about 190 periods for its overall comparison. Using that as a rough per-label guide, every label except "stopped" reaches it at 0.3. At 0.5, bounces fall to about 170.
 - **If hidden collisions matter most.** If the protocol freeze makes them the priority, for example for calibration (H2) or decisions (H3), rate 0.4 gives about 390 collision periods per 1,000 episodes while keeping about 175 bounces.
 - **Cost.** It is lowest at 0.3: 0.92 s per episode without rendering, about 25 minutes for 10,000 episodes on 8 cores.
 
-**Applying the chosen rate.** `P_COLLIDE` is shared by versions 2 and 3. When the rate is decided, it becomes a per-version setting: version 2 keeps 0.5 so that its results reproduce, and version 3 takes the chosen rate.
+**Applying the chosen rate.** `P_COLLIDE` is now a per-version setting: version 2 keeps 0.5, so its results reproduce, and version 3 uses 0.3. Version 3 at 0.3 attempts a collision course in a subset of the episodes that version 2 attempts at 0.5.
 
 **Limitations:**
 - 1,000 episodes and one generator seed per episode.
