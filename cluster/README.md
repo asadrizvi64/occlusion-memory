@@ -76,3 +76,48 @@ sacct -j <jobid> -X
 - The matmul benchmark (40.5 TFLOPS) ran without warm-up, so it mostly measured cuBLAS start-up.
 - The first render (64×64, 2.28 s) included creating the EGL context.
 - Training used synthetic data already on the GPU with a 0.8M-parameter model, so its times are lower bounds.
+
+## B3 rebuild (change 2): job chain, not yet submitted
+
+**Status.** Prepared on branch `stage1-prep/b3-rgb`. Nothing has been submitted, and no workspace has been created. Both wait for the user's go-ahead.
+
+### Before submitting (login node)
+
+1. **Workspace.** Create one for this project. The filesystem name `cat` is inferred from the other project's path (`/data/cat/ws/…`); confirm it with `ws_list -l` first.
+
+   ```bash
+   ws_allocate -F cat occlusion-memory 30
+   ```
+
+   ```bash
+   export OM_DATA=$(ws_find -F cat occlusion-memory)/b3
+   ```
+
+2. **Checkout.** Bring this project's own checkout to the branch, and only while none of its jobs are running. `~/3dgs-project` is never touched.
+
+   ```bash
+   cd ~/occlusion-memory && git fetch && git checkout stage1-prep/b3-rgb && git pull --ff-only
+   ```
+
+### Submitting
+
+```bash
+cd ~/occlusion-memory && bash cluster/submit_b3.sh
+```
+
+This submits three jobs as a chain:
+
+| Job | What it does | Resources per job | Time limit | Expected time | GPU-hours, expected (limit) |
+|---|---|---|---|---|---|
+| `om-b3-data` | Render train 10,000 / val 500 / eval 1,000 development episodes (generator version 3, rate 0.3) at 64×64 and 96×96 into `$OM_DATA`, about 37 GB | 1 GPU (EGL rendering only), 32 CPUs, 96 GB | 1 h | 15–25 min | 0.3–0.4 (1.0) |
+| `om-b3-train`, array 0–11 | One B3-RGB training run each: resolution {64, 96} × inputs {rgb, rgb+meas} × seed {0, 1, 2}; 20 epochs, then predictions on the eval block | 1 GPU, 8 CPUs, 64 GB | 1 h each | about 7 min (64×64) or 11 min (96×96) each | about 1.8 for all 12 (12.0) |
+| `om-b3-eval` | Score the 12 runs and B1d on the eval block. CPU work; the GPU is idle | 1 GPU, 16 CPUs, 32 GB | 30 min | about 10 min | 0.2 (0.5) |
+| **Total** | | | | **about 45–60 min wall time** if the 12 training tasks run in parallel | **about 2.5 expected, 13.5 at most** |
+
+**How the training time was estimated.** B3-RGB needs 1.06 TFLOP per training step at 64×64 and 2.34 at 96×96 (batch 32 × 80 frames; `cluster/estimate_b3.py`). That is 4.5× the smoke-test model. Scaling the smoke test's measured H100 throughput by that ratio gives 4.0 and 7.4 minutes of compute per run. Loading the data (9.8 or 22 GB), validation and prediction add about 3–4 minutes. It is an estimate: even at 3× slower, the total stays under 6 GPU-hours.
+
+### Outputs
+
+- `$OM_DATA/{train,val,eval}/`: shards and `manifest.json`.
+- `$OM_DATA/runs/b3-<inputs>-<res>-s<seed>/`: `config.json`, `log.json`, `ckpt.pt`, `preds_eval.npz`.
+- In this checkout: `results/b3_eval_{tables.md,summary.json,periods.csv}` and the logs in `cluster/logs/`.
