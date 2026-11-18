@@ -496,7 +496,7 @@ The same runs also answer the open resolution question, 64×64 or 96×96.
   - a full-covariance Gaussian over each ball's position.
 
   Ball *i* is the ball drawn in colour *i*.
-  - This is the deterministic recurrent variant. The spec describes B3 as "DreamerV3-style" (stochastic latent, image reconstruction); which one Stage 1 uses is for the protocol freeze.
+  - **Stand-in, not the spec's B3.** This deterministic GRU stands in for the spec's DreamerV3-style B3 (stochastic recurrent latent, image reconstruction, action input) until the protocol is frozen. Results from it describe this stand-in only; whether Stage 1 uses it or the DreamerV3-style model is decided at the protocol freeze.
 - **Inputs:**
   - `rgb`: the B3 candidate.
   - `rgb+meas`: RGB plus the oracle noisy positions that B1d receives. It is a diagnostic, not a baseline: comparing it with `rgb` separates perception error from memory error, which is what the resolution decision turns on.
@@ -519,11 +519,20 @@ The same runs also answer the open resolution question, 64×64 or 96×96.
 - **Learning check.** Overfitting 16 episodes for 300 steps reduced visible-frame error from 43 to 4.3 cm and hidden-frame error from 26 to 2.6 cm. The model localizes the balls, so the colour-to-slot mapping, the coordinates and the loss are wired correctly.
 - 24 tests pass (`tests/`). They cover the rendering identity, the label split, the loss against the closed-form Gaussian NLL, the spec's size limits and a two-episode pipeline.
 
-### Decision rules, proposed before any result (for the user to confirm)
+### Decision rules (fixed 18 Nov, before any eval-block result)
 
-1. **B3 is strong** if it is not significantly worse than B1d on no-event periods: the 95% interval of B1d − B3-rgb on those periods reaches 0 or above.
-2. **Use 96×96** if, for B3-rgb, the paired 64×64 − 96×96 difference in mean hidden error over all periods has a 95% interval above 0 **and** is at least 10% of the 64×64 error. Otherwise keep the spec's 64×64.
-   - Diagnostics, reported with the rule: visible-frame error and the rgb − rgb+meas gap at each resolution.
+`b3_eval.py` evaluates both rules mechanically and prints the verdicts with the results (`RULE1_MARGIN_CM`, `RULE2_MIN_GAIN`). Rule 2 is applied first, because it picks the resolution at which rule 1 is judged.
+
+- **Rule 2, resolution.** For B3-rgb, use 96×96 only if all three hold. Otherwise keep the spec's 64×64.
+  - **(a)** The paired 64×64 − 96×96 difference in mean hidden error over all periods (seeds averaged per period) has a 95% interval above 0.
+  - **(b)** That difference is at least 10% of the 64×64 error.
+  - **(c)** Every 96×96 seed has a lower mean hidden error over all periods than every 64×64 seed (3 seeds each).
+  - Diagnostics, reported with the rule: visible-frame error and the rgb − rgb+meas gap at each resolution.
+- **Rule 1, strength.** B3-rgb, at the resolution rule 2 picks, is strong only if the **upper 95% bound of (B3 − B1d) on no-event periods is below X = 1.2 cm**.
+  - **Where X comes from.** It is the spec's provisional minimum important improvement, 20%, applied to B1d's mean no-event error under generator version 3 at rate 0.3: 6.1 cm [5.1, 7.3] over 180 periods. That was measured on development seeds 0–399, already used and not the eval block.
+  - **What it means.** B3 counts as strong only if it cannot be worse than B1d by as much as the study itself would call important.
+  - **What it takes to pass.** With about 460 no-event periods in the eval block, the interval's half-width should be about 0.4–0.5 cm. B3 passes only if its no-event error is at most about 0.7 cm above B1d's.
+  - **Other variants.** Rule 1 is also reported for the other variants, as information only.
 
 ### Limitations
 

@@ -68,3 +68,35 @@ def test_data_pipeline_two_episodes(tmp_path, monkeypatch):
     assert x64.shape == (2, 80, 64, 64, 3) and x96.shape == (2, 80, 96, 96, 3)
     Y, present, hidden, meas = b3_rgb.arrays(eps)
     assert not present[:, 0].any() and (hidden <= present).all() and Y.shape == (2, 80, 2, 2)
+
+
+def _rules_inputs(err96_seeds, none_64=6.5, none_96=5.2):
+    import pandas as pd
+    rows = []
+    for s in range(40):  # 40 episodes, one no-event and one bounce period each
+        for lab, a, b1, e64, e96 in (("none", 1, 5.0, none_64, none_96), ("bounce", 20, 15.0, 13.5, 10.9)):
+            jitter = 0.01 * (s % 5)
+            rows += [dict(variant="B1d", seed=s, ball=0, a=a, label_fine=lab, err=b1 + jitter),
+                     dict(variant="B3-rgb-64", seed=s, ball=0, a=a, label_fine=lab, err=e64 + jitter),
+                     dict(variant="B3-rgb-96", seed=s, ball=0, a=a, label_fine=lab, err=e96 + jitter)]
+    V = pd.DataFrame(rows)
+    spread = {"B3-rgb-64": {"per_seed": {f"s{i}": e for i, e in enumerate([10.1, 10.0, 9.9])}},
+              "B3-rgb-96": {"per_seed": {f"s{i}": e for i, e in enumerate(err96_seeds)}}}
+    return V, spread
+
+
+def test_decision_rules():
+    import b3_eval
+    rng = np.random.default_rng(0)
+    # 96x96 better by 2.45 cm of 10 (24%), every seed better: choose 96; B3-96 is 0.2 cm worse than B1d on no-event: strong
+    R = b3_eval.decision_rules(*_rules_inputs([8.1, 8.0, 7.9]), rng)
+    assert R["rule2"]["choose_96"] and R["chosen_resolution"] == 96 and R["b3_strong"] is True
+    # one 96x96 seed is worse than a 64x64 seed: rule 2 fails on (c); judged at 64, which is 1.5 cm worse: not strong
+    R = b3_eval.decision_rules(*_rules_inputs([8.1, 8.0, 10.0]), rng)
+    assert R["rule2"]["a_ci_above_0"] and R["rule2"]["b_gain_at_least_min"]
+    assert not R["rule2"]["c_every_96_seed_beats_every_64_seed"] and R["chosen_resolution"] == 64
+    assert R["b3_strong"] is False and R["rule1"]["B3-rgb-64"]["b3_minus_b1d_none"][2] > b3_eval.RULE1_MARGIN_CM
+    # fewer than 3 seeds: rule 2 cannot pass
+    V, spread = _rules_inputs([8.1, 8.0, 7.9])
+    spread["B3-rgb-96"]["per_seed"] = {"s0": 8.0}
+    assert not b3_eval.decision_rules(V, spread, rng)["rule2"]["choose_96"]

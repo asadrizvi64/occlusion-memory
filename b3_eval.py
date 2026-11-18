@@ -38,6 +38,11 @@ B1D = D.B1D
 N_ES = 200
 B_BOOT = 2000
 GROUPS = ("all",) + FINE + ("event",)  # event = bounce + collision_long + collision_short
+# Decision rules, fixed on 18 Nov 2026 before any eval-block result (docs/STAGE1_PREP.md, change 2).
+# Rule 1 margin: 20% (the spec's provisional minimum important improvement) of B1d's mean no-event error on
+# development seeds 0-399 under generator version 3 at rate 0.3, 6.1 cm [5.1, 7.3] (180 periods); not the eval block.
+RULE1_MARGIN_CM = 1.2
+RULE2_MIN_GAIN = 0.10  # 96x96 must cut B3-rgb's mean hidden error by at least 10% of the 64x64 error
 
 
 def score_method(args):
@@ -142,7 +147,46 @@ def summarize(df, vis, runs, n_eps):
             paired(f"B3-rgb-minus-rgb+meas-{res}", f"B3-rgb-{res}", f"B3-rgb+meas-{res}")
     for r in runs:
         S["runs"][r["name"]] = {k: r["cfg"].get(k) for k in ("params", "w_hidden", "n_train", "epochs", "best_val_wnll", "train_s", "commit")}
+    S["rules"] = decision_rules(V, S["seed_spread"], rng)
     return S, V
+
+
+def decision_rules(V, spread, rng, inputs="rgb"):
+    """The two pre-registered rules, evaluated mechanically.
+
+    Rule 2 (resolution) for B3-<inputs>: 96x96 is chosen only if (a) the paired 64x64 - 96x96 difference in mean hidden
+    error over all periods has a 95% interval above 0, (b) its mean is at least RULE2_MIN_GAIN of the 64x64 error, and
+    (c) every 96x96 seed has a lower mean hidden error over all periods than every 64x64 seed (3 seeds each).
+    Rule 1 (strength): B3-<inputs> at the chosen resolution is strong only if the upper 95% bound of (B3 - B1d) on
+    no-event periods is below RULE1_MARGIN_CM. It is also reported for the other variants, as information."""
+    key = ["seed", "ball", "a"]
+    out = dict(rule1_margin_cm=RULE1_MARGIN_CM, rule2_min_gain=RULE2_MIN_GAIN, inputs=inputs, rule1={}, rule2=None)
+    b1 = V[(V.variant == "B1d") & (V.label_fine == "none")].set_index(key).err
+    for v in sorted(V.variant.unique()):
+        if v == "B1d":
+            continue
+        b3 = V[(V.variant == v) & (V.label_fine == "none")].set_index(key).err
+        x = (b3 - b1.reindex(b3.index)).dropna()
+        ci = boot(x.values, x.index.get_level_values(0).values, rng)
+        out["rule1"][v] = dict(b3_minus_b1d_none=ci[:3], n=ci[3], upper_below_margin=bool(ci[2] < RULE1_MARGIN_CM))
+    v64, v96 = f"B3-{inputs}-64", f"B3-{inputs}-96"
+    if v64 in spread and v96 in spread:
+        a, b = V[V.variant == v64].set_index(key).err, V[V.variant == v96].set_index(key).err
+        x = (a - b.reindex(a.index)).dropna()
+        ci = boot(x.values, x.index.get_level_values(0).values, rng)
+        e64, e96 = list(spread[v64]["per_seed"].values()), list(spread[v96]["per_seed"].values())
+        gain = ci[0] / float(a.mean())
+        complete = len(e64) >= 3 and len(e96) >= 3
+        r2 = dict(diff_64_minus_96_all=ci[:3], n=ci[3], gain_fraction=gain, seeds_64=e64, seeds_96=e96,
+                  a_ci_above_0=bool(ci[1] > 0), b_gain_at_least_min=bool(gain >= RULE2_MIN_GAIN),
+                  c_every_96_seed_beats_every_64_seed=bool(max(e96) < min(e64)), seeds_complete=complete)
+        r2["choose_96"] = bool(complete and r2["a_ci_above_0"] and r2["b_gain_at_least_min"] and r2["c_every_96_seed_beats_every_64_seed"])
+        out["rule2"] = r2
+        chosen = v96 if r2["choose_96"] else v64
+        out["chosen_resolution"] = 96 if r2["choose_96"] else 64
+        out["b3_strong"] = out["rule1"].get(chosen, {}).get("upper_below_margin")
+        out["b3_strong_variant"] = chosen
+    return out
 
 
 def tables(S):
@@ -150,6 +194,21 @@ def tables(S):
     out = [f"# B3-RGB evaluation ({S['n_episodes']} eval episodes, {S['n_episodes_with_hidden_periods']} with hidden periods)\n",
            "Mean hidden-position error (cm) per period, averaged over periods; B3 variants averaged over their seeds. "
            "collision_short: hidden for at most 2 frames from the contact on.\n"]
+    R = S.get("rules", {})
+    if R.get("rule2"):
+        r2 = R["rule2"]
+        out += ["## Decision rules (fixed before any eval result)\n",
+                f"**Rule 2, resolution** (B3-{R['inputs']}): 64x64 - 96x96 mean hidden error, all periods: {fmt(r2['diff_64_minus_96_all'])} cm "
+                f"({r2['gain_fraction']:+.1%} of the 64x64 error; n = {r2['n']}). (a) interval above 0: {r2['a_ci_above_0']}; "
+                f"(b) gain >= {R['rule2_min_gain']:.0%}: {r2['b_gain_at_least_min']}; (c) every 96x96 seed beats every 64x64 seed: "
+                f"{r2['c_every_96_seed_beats_every_64_seed']} (64: {', '.join(f'{e:.2f}' for e in r2['seeds_64'])}; 96: {', '.join(f'{e:.2f}' for e in r2['seeds_96'])})."
+                + ("" if r2["seeds_complete"] else " Fewer than 3 seeds per resolution: the rule cannot pass.")
+                + f" **Chosen: {R['chosen_resolution']}x{R['chosen_resolution']}.**\n",
+                f"**Rule 1, strength** (margin {R['rule1_margin_cm']} cm): B3 - B1d on no-event periods, upper 95% bound must be below the margin.\n",
+                "| Variant | B3 - B1d, no-event periods (cm) | n | Upper bound below margin |", "|---|---|---|---|"]
+        for v, r in R["rule1"].items():
+            out.append(f"| {v} | {fmt(r['b3_minus_b1d_none'])} | {r['n']} | {r['upper_below_margin']} |")
+        out += ["", f"**B3 strong: {R['b3_strong']}** (judged on {R['b3_strong_variant']}, the chosen resolution).\n"]
     n = S["groups"]["B1d"]
     out.append("| Method | " + " | ".join(f"{g} (n={n[g]['n']})" for g in GROUPS) + " | Visible-frame error | Seed SD (all) |")
     out.append("|" + "---|" * (len(GROUPS) + 3))

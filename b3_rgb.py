@@ -3,8 +3,8 @@
 Model: a per-frame CNN encoder (RGBEncoder; the spec requires all learned models to share one RGB encoder), a GRU
 over time (causal: the estimate at frame t uses frames 0..t only, like the filters), and a head giving each ball's
 position as a 2D Gaussian with full covariance. Ball i is the ball drawn in colour gen.COLORS[i], so slots are fixed.
-About 2.3M parameters (spec: 1-5M). This is the deterministic recurrent variant; the spec's B3 is "DreamerV3-style"
-(stochastic latent, image reconstruction), which is a decision for the protocol freeze.
+About 2.3M parameters (spec: 1-5M). This deterministic GRU stands in for the spec's DreamerV3-style B3 (stochastic
+latent, image reconstruction) until the protocol is frozen.
 
 Inputs:
   rgb        RGB frames only. The B3 candidate: the same scene information as the other methods.
